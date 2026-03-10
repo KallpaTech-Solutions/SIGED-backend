@@ -1,0 +1,41 @@
+## --- ARCHIVOS DE CONFIGURACIÓN Y SECRETOS ---
+appsettings.Development.json
+appsettings.Local.json
+usersecrets.json
+**/.env
+**/secrets.dev.yaml
+**/values.dev.yaml
+
+## --- ARTEFACTOS DE COMPILACIÓN (.NET & NODE) ---
+**/bin/
+**/obj/
+**/node_modules/
+**/npm-debug.log
+**/*.*proj.user
+
+## --- IDEs Y HERRAMIENTAS ---
+**/.vs/
+**/.vscode/
+**/.project
+**/.settings
+**/.classpath
+**/.toolstarget
+**/*.dbmdl
+**/*.jfm
+**/azds.yaml
+
+## --- DOCKER ---
+# Ignoramos datos y compose local, pero PERMITIMOS el Dockerfile
+**/.dockerignore
+**/docker-compose.override.yaml
+
+## --- REGLAS DE GIT (NEGACIONES) ---
+**/.git
+!**/.gitignore
+!.git/HEAD
+!.git/config
+!.git/packed-refs
+!.git/refs/heads/**
+
+## --- OTROS ---
+**/charts/

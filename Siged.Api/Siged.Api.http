@@ -1,0 +1,6 @@
+@Siged.Api_HostAddress = http://localhost:5267
+
+GET {{Siged.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

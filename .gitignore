@@ -1,0 +1,24 @@
+## --- ARTIFACTOS DE COMPILACIÓN (.NET) ---
+**/bin/
+**/obj/
+[Dd]ebug/
+[Rr]elease/
+
+## --- CONFIGURACIÓN DE VISUAL STUDIO ---
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+.vscode/
+
+## --- CONFIGURACIONES SENSIBLES (SEGURIDAD) ---
+# Ignoramos el de desarrollo porque tiene tus claves locales
+Siged.Api/appsettings.Development.json
+
+# NO ignoramos el appsettings.json porque es la plantilla (Placeholder)
+!Siged.Api/appsettings.json
+
+## --- OTROS ---
+.DS_Store
+dist/
+node_modules/
