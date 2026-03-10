@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Siged.Domain.Entities.Security;
+using Siged.Infrastructure.Persistence;
 using Siged.Infrastructure.Services.Security;
 using System.Text;
 
@@ -38,6 +40,37 @@ public static class ServiceExtensions
     // 2. Seguridad: Autenticación + Autorización Dinámica
     public static IServiceCollection AddSecurityConfiguration(this IServiceCollection services, IConfiguration config)
     {
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options => {
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidateLifetime = true,
+                ValidateIssuerSigningKey = true,
+                ValidIssuer = config["JwtSettings:Issuer"],
+                ValidAudience = config["JwtSettings:Audience"],
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["JwtSettings:Secret"]!))
+            };
+
+            // 🔥 NUEVO: Evento para validar la "Lista Negra"
+            options.Events = new JwtBearerEvents
+            {
+                OnTokenValidated = async context =>
+                {
+                    var db = context.HttpContext.RequestServices.GetRequiredService<ApplicationDbContext>();
+                    var tokenRaw = (context.SecurityToken as System.IdentityModel.Tokens.Jwt.JwtSecurityToken)?.RawData;
+
+                    // ¿Está este token en la lista negra?
+                    var esInvalido = await db.TokensInvalidados.AnyAsync(t => t.Token == tokenRaw);
+
+                    if (esInvalido)
+                    {
+                        context.Fail("Este token ha sido revocado (Logout).");
+                    }
+                }
+            };
+        });
         // JWT
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options => {
@@ -79,4 +112,6 @@ public static class ServiceExtensions
         });
         return services;
     }
+
+    
 }

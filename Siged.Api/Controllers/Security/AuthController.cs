@@ -1,35 +1,28 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Siged.Application.Interfaces.Security;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Siged.Application.DTOs.Security;
+using Siged.Application.Interfaces.Security;
+using Siged.Domain.Entities.Security;
+using Siged.Infrastructure.Persistence; // <--- 1. ASEGÚRATE DE TENER ESTE USING
 
 namespace Siged.Api.Controllers.Security
 {
-    /// <summary>
-    /// Controlador encargado de la autenticación y emisión de tokens de acceso.
-    /// </summary>
     [ApiController]
     [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+        private readonly ApplicationDbContext _context; // <--- 2. DECLARA EL CONTEXTO
 
-        public AuthController(IAuthService authService) => _authService = authService;
+        // 3. INYECTA EL CONTEXTO EN EL CONSTRUCTOR
+        public AuthController(IAuthService authService, ApplicationDbContext context)
+        {
+            _authService = authService;
+            _context = context;
+        }
 
-        /// <summary>
-        /// Autentica las credenciales de un usuario y genera un Token JWT.
-        /// </summary>
-        /// <remarks>
-        /// Si es el primer ingreso del usuario (RequiereCambioPassword = true), 
-        /// el sistema retornará un flag para que React obligue al cambio de clave.
-        /// </remarks>
-        /// <param name="request">Credenciales (Username y Password).</param>
-        /// <response code="200">Retorna el token y datos básicos del perfil.</response>
-        /// <response code="401">Credenciales inválidas.</response>
-        /// <response code="403">Cuenta desactivada por el administrador.</response>
         [HttpPost("login")]
-        [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(LoginResponseDto))]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> Login([FromBody] LoginRequestDto request)
         {
             try
@@ -39,14 +32,12 @@ namespace Siged.Api.Controllers.Security
                 if (result == null)
                     return Unauthorized(new { message = "Credenciales incorrectas." });
 
-                // ✅ ESTANDARIZACIÓN: Siempre devolvemos el mismo objeto
                 return Ok(new
                 {
                     token = result.Token,
                     username = result.Username,
                     rol = result.Rol,
                     nombreCompleto = result.NombreCompleto,
-                    // 💡 Usamos el mismo nombre que tienes en tu base de datos y DTOs
                     requiereCambioPassword = result.RequiereCambioPassword,
                     message = result.RequiereCambioPassword
                         ? "Debe actualizar su contraseña por seguridad."
@@ -57,6 +48,42 @@ namespace Siged.Api.Controllers.Security
             {
                 return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
             }
+        }
+
+        [HttpPost("logout")]
+        [Authorize]
+        public async Task<IActionResult> Logout()
+        {
+            // 1. Extraer el token y el ID del usuario
+            var token = Request.Headers["Authorization"].ToString().Replace("Bearer ", "");
+            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(userIdClaim)) return Unauthorized();
+            int userId = int.Parse(userIdClaim);
+
+            // 2. Obtener fecha de expiración del token
+            var expClaim = User.FindFirst("exp")?.Value;
+            if (string.IsNullOrEmpty(expClaim)) return BadRequest();
+            var fechaExp = DateTimeOffset.FromUnixTimeSeconds(long.Parse(expClaim)).UtcDateTime;
+
+            // 3. Insertar en Blacklist y Auditoría
+            // Ahora _context ya existe y no dará error
+            _context.TokensInvalidados.Add(new TokenInvalidado
+            {
+                Token = token,
+                FechaExpiracion = fechaExp
+            });
+
+            _context.AuditoriaLogs.Add(new AuditoriaLog
+            {
+                UsuarioId = userId,
+                Accion = "LOGOUT",
+                Detalle = "Cierre de sesión seguro desde el frontend",
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString()
+            });
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Sesión cerrada con éxito." });
         }
     }
 }

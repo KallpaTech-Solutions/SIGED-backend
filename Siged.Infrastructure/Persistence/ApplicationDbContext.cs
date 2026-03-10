@@ -20,7 +20,8 @@ namespace Siged.Infrastructure.Persistence
         public DbSet<Permiso> Permisos { get; set; }
         public DbSet<Dependencia> Dependencias { get; set; }
         public DbSet<Organizacion> Organizaciones { get; set; }
-
+        public DbSet<TokenInvalidado> TokensInvalidados { get; set; }
+        public DbSet<AuditoriaLog> AuditoriaLogs { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
