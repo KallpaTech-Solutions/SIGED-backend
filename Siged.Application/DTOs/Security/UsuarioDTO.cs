@@ -8,6 +8,7 @@
         public string Dni { get; set; } = null!;
         public string Rol { get; set; } = null!;
         public bool EstaActivo { get; set; }
+        public string? FotoPath { get; set; } // ✅ Agregado para miniaturas
 
         // 🏛️ IDENTIFICACIÓN INSTITUCIONAL
         // Reemplazamos 'NombreOrganizacion' por algo más genérico y sus siglas

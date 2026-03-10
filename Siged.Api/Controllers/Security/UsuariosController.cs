@@ -165,12 +165,16 @@ namespace Siged.Api.Controllers.Security
         [Authorize(Policy = Permissions.SecurityUserView)]
         public async Task<ActionResult<IEnumerable<UsuarioDTO>>> GetUsuarios([FromQuery] int? organizacionId)
         {
-            var query = _context.Usuarios.Include(u => u.Rol).Include(u => u.Organizacion).Include(u => u.Persona).AsQueryable();
+            var query = _context.Usuarios
+                .Include(u => u.Rol)
+                .Include(u => u.Organizacion)
+                .Include(u => u.Persona)
+                .AsQueryable();
 
             if (organizacionId.HasValue && organizacionId > 0)
                 query = query.Where(u => u.OrganizacionId == organizacionId.Value);
 
-            #pragma warning disable CS8601 
+            #pragma warning disable CS8601 // Ignorar posible nulo en proyecciones
             var usuarios = await query
                 .Where(u => u.Persona != null && u.Rol != null)
                 .OrderByDescending(u => u.FechaRegistro)
@@ -182,11 +186,18 @@ namespace Siged.Api.Controllers.Security
                     Dni = u.Persona.DNI,
                     Rol = u.Rol.Nombre,
                     EstaActivo = u.EstaActivo,
+                    FotoPath = u.Persona.FotoPath, // ✅ Ahora la lista también tiene fotos
+                    OrganizacionId = u.OrganizacionId,
+                    DependenciaId = (u.Persona is Administrador) ? ((Administrador)u.Persona).DependenciaId : null,
                     Entidad = u.Persona is Administrador
                         ? (((Administrador)u.Persona).Dependencia != null ? ((Administrador)u.Persona).Dependencia!.Siglas : "S/D")
-                        : (u.Organizacion != null ? u.Organizacion.Abreviatura : "SEDE CENTRAL")
+                        : (u.Organizacion != null ? u.Organizacion.Abreviatura : "SEDE CENTRAL"),
+                    NombreInstitucion = u.Persona is Administrador
+                        ? (((Administrador)u.Persona).Dependencia != null ? ((Administrador)u.Persona).Dependencia!.Nombre : "OFICINA CENTRAL")
+                        : (u.Organizacion != null ? u.Organizacion.Nombre : "UNAS")
                 }).ToListAsync();
-            #pragma warning restore CS8601
+                #pragma warning restore CS8601
+
             return Ok(usuarios);
         }
 
@@ -198,24 +209,43 @@ namespace Siged.Api.Controllers.Security
         public async Task<IActionResult> GetUsuarioById(int id)
         {
             var usuario = await _context.Usuarios
-                .Include(u => u.Persona).Include(u => u.Rol).ThenInclude(r => r.Permisos)
-                .Include(u => u.PermisosEspeciales).Include(u => u.Organizacion)
+                .Include(u => u.Persona)
+                .Include(u => u.Rol).ThenInclude(r => r.Permisos)
+                .Include(u => u.PermisosEspeciales)
+                .Include(u => u.Organizacion)
                 .FirstOrDefaultAsync(u => u.Id == id);
 
             if (usuario == null) return NotFound();
 
             object? detalles = null;
-            if (usuario.Persona is Administrador admin) detalles = new { Tipo = "Administrador", admin.DependenciaId, admin.EsPersonalInterno };
-            else if (usuario.Persona is Estudiante est) detalles = new { Tipo = "Estudiante", est.CodigoEstudiante, est.EstaMatriculado };
-            else if (usuario.Persona is Encargado enc) detalles = new { Tipo = "Encargado", enc.Cargo, enc.Oficina };
+            if (usuario.Persona is Administrador admin)
+                detalles = new { Tipo = "Administrador", admin.DependenciaId, admin.EsPersonalInterno };
+            else if (usuario.Persona is Estudiante est)
+                detalles = new { Tipo = "Estudiante", est.CodigoEstudiante, est.EstaMatriculado };
+            else if (usuario.Persona is Encargado enc)
+                detalles = new { Tipo = "Encargado", enc.Cargo, enc.Oficina };
 
             return Ok(new
             {
                 usuario.Id,
                 usuario.Username,
+                usuario.EstaActivo,
+                usuario.FechaRegistro,
                 Rol = usuario.Rol.Nombre,
-                Persona = new { usuario.Persona.DNI, usuario.Persona.Nombres, usuario.Persona.Apellidos, usuario.Persona.Correo, Detalles = detalles },
-                Organizacion = usuario.Organizacion?.Nombre ?? "UNAS - SEDE CENTRAL",
+                Persona = new
+                {
+                    usuario.Persona.DNI,
+                    usuario.Persona.Nombres,
+                    usuario.Persona.Apellidos,
+                    usuario.Persona.Correo,
+                    usuario.Persona.FotoPath, // ✅ Clave para que se vea en la ficha
+                    Detalles = detalles
+                },
+                Organizacion = new
+                {
+                    Id = usuario.OrganizacionId,
+                    Nombre = usuario.Organizacion?.Nombre ?? "UNAS - SEDE CENTRAL"
+                },
                 PermisosDelRol = usuario.Rol.Permisos.Select(p => p.IdPermiso).ToList(),
                 PermisosDirectos = usuario.PermisosEspeciales.Select(p => p.IdPermiso).ToList()
             });
