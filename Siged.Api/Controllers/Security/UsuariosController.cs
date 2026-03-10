@@ -393,7 +393,63 @@ namespace Siged.Api.Controllers.Security
             await _context.SaveChangesAsync();
             return Ok(new { fotoUrl = usuario.Persona.FotoPath });
         }
+        /// <summary>
+        /// Elimina de forma permanente un usuario y su perfil asociado (Persona).
+        /// Protege la jerarquía institucional y evita el auto-borrado.
+        /// </summary>
+        /// <response code="200">Eliminado con éxito.</response>
+        /// <response code="403">Jerarquía insuficiente o intento de auto-borrado.</response>
+        [HttpDelete("{id}")]
+        [Authorize(Policy = Permissions.SecurityUserManage)]
+        public async Task<IActionResult> EliminarUsuario(int id)
+        {
+            var ejecutorId = GetUserIdFromToken();
 
-        
+            // 1. Regla de Oro: Un administrador no puede suicidarse digitalmente
+            if (id == ejecutorId)
+                return BadRequest(new { message = "No puedes eliminar tu propia cuenta desde este panel." });
+
+            var ejecutor = await _context.Usuarios.Include(u => u.Rol).FirstOrDefaultAsync(u => u.Id == ejecutorId);
+            var objetivo = await _context.Usuarios.Include(u => u.Rol).Include(u => u.Persona).FirstOrDefaultAsync(u => u.Id == id);
+
+            if (objetivo == null || ejecutor?.Rol == null) return NotFound();
+
+            // 2. Validación de Jerarquía Institucional
+            // Un Admin (Nivel 80) no puede borrar a otro Admin (Nivel 80) ni a un SuperAdmin (Nivel 100)
+            if (ejecutor.Rol.Nombre != "SuperAdmin" && objetivo.Rol.Nivel >= ejecutor.Rol.Nivel)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden,
+                    new { message = "No tienes rango suficiente para eliminar a este usuario." });
+            }
+
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                // 3. Eliminamos el Usuario (La cuenta de acceso)
+                _context.Usuarios.Remove(objetivo);
+
+                // 4. Eliminamos la Persona (El perfil físico: DNI, nombres, etc.)
+                // Esto es importante para no dejar "datos huérfanos" en la tabla Personas
+                if (objetivo.Persona != null)
+                {
+                    _context.Personas.Remove(objetivo.Persona);
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Ok(new { message = "Usuario y perfil eliminados permanentemente del sistema." });
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return BadRequest(new
+                {
+                    message = "No se puede eliminar el usuario porque tiene registros asociados (ej. torneos, documentos). Prueba desactivándolo mejor.",
+                    detail = ex.Message
+                });
+            }
+        }
+
     }
 }
