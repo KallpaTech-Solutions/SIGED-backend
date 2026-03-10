@@ -52,41 +52,73 @@ namespace Siged.Api.Controllers.Security
         public async Task<IActionResult> RegistrarUsuario([FromBody] UserCreateDto dto)
         {
             var ejecutorId = GetUserIdFromToken();
-            var ejecutor = await _context.Usuarios.Include(u => u.Rol).FirstOrDefaultAsync(u => u.Id == ejecutorId);
+            var ejecutor = await _context.Usuarios
+                .Include(u => u.Rol)
+                .FirstOrDefaultAsync(u => u.Id == ejecutorId);
+
             if (ejecutor?.Rol == null)
-            {
                 return Unauthorized(new { message = "Sesión inválida o sin privilegios." });
-            }
 
             var rolDestino = await _context.Roles.FindAsync(dto.RolId);
-            if (rolDestino == null) return BadRequest(new { message = "Rol inexistente." });
+            if (rolDestino == null)
+                return BadRequest(new { message = "Rol inexistente." });
 
             if (ejecutor.Rol.Nombre != "SuperAdmin" && rolDestino.Nivel >= ejecutor.Rol.Nivel)
                 return StatusCode(StatusCodes.Status403Forbidden, new { message = "No puedes crear usuarios de nivel igual o superior." });
+
+            // ✅ VALIDACIONES DE NEGOCIO ANTES DE LA TRANSACCIÓN
+            if (await _context.Personas.AnyAsync(p => p.DNI == dto.DNI))
+                return BadRequest(new { message = "El DNI ya existe en el sistema." });
+
+            if (await _context.Usuarios.AnyAsync(u => u.Username == dto.Username))
+                return BadRequest(new { message = "El nombre de usuario ya está registrado." });
+
+            if (dto.RolId == 4 && !string.IsNullOrWhiteSpace(dto.CodigoEstudiante))
+            {
+                var codigo = dto.CodigoEstudiante.Trim();
+                if (await _context.Personas.OfType<Estudiante>().AnyAsync(e => e.CodigoEstudiante == codigo))
+                    return BadRequest(new { message = "El código de estudiante ya está registrado." });
+            }
 
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
                 Persona persona;
-                // Fábrica de personas con inicialización de campos requeridos (Fix CS9035)
                 if (dto.RolId == 1 || dto.RolId == 2)
                 {
-                    persona = new Administrador { 
-                        DNI = dto.DNI, 
-                        Nombres = dto.Nombres, 
-                        Apellidos = dto.Apellidos, 
-                        Correo = dto.Correo, 
-                        DependenciaId = dto.DependenciaId, 
-                        EsPersonalInterno = dto.EsPersonalInterno 
+                    persona = new Administrador
+                    {
+                        DNI = dto.DNI,
+                        Nombres = dto.Nombres,
+                        Apellidos = dto.Apellidos,
+                        Correo = dto.Correo,
+                        DependenciaId = dto.DependenciaId,
+                        EsPersonalInterno = dto.EsPersonalInterno
                     };
                 }
                 else if (dto.RolId == 4)
                 {
-                    persona = new Estudiante { DNI = dto.DNI, Nombres = dto.Nombres, Apellidos = dto.Apellidos, Correo = dto.Correo, CodigoEstudiante = dto.CodigoEstudiante ?? "", EstaMatriculado = true };
+                    persona = new Estudiante
+                    {
+                        DNI = dto.DNI,
+                        Nombres = dto.Nombres,
+                        Apellidos = dto.Apellidos,
+                        Correo = dto.Correo,
+                        CodigoEstudiante = dto.CodigoEstudiante ?? "",
+                        EstaMatriculado = true
+                    };
                 }
                 else
                 {
-                    persona = new Encargado { DNI = dto.DNI, Nombres = dto.Nombres, Apellidos = dto.Apellidos, Correo = dto.Correo, Cargo = dto.Cargo ?? "Personal", Oficina = dto.Oficina ?? "N/A" };
+                    persona = new Encargado
+                    {
+                        DNI = dto.DNI,
+                        Nombres = dto.Nombres,
+                        Apellidos = dto.Apellidos,
+                        Correo = dto.Correo,
+                        Cargo = dto.Cargo ?? "Personal",
+                        Oficina = dto.Oficina ?? "N/A"
+                    };
                 }
 
                 _context.Personas.Add(persona);
@@ -111,10 +143,26 @@ namespace Siged.Api.Controllers.Security
 
                 return CreatedAtAction(nameof(GetUsuarioById), new { id = usuario.Id }, new { message = "Registrado correctamente." });
             }
+            catch (DbUpdateException ex)
+            {
+                await transaction.RollbackAsync();
+
+                // Fallback: si algo se escapó de las validaciones previas
+                var inner = ex.InnerException?.Message ?? ex.Message;
+                return BadRequest(new
+                {
+                    message = "Fallo en transacción al registrar usuario.",
+                    detail = inner
+                });
+            }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return BadRequest(new { message = "Fallo en transacción.", detail = ex.Message });
+                return BadRequest(new
+                {
+                    message = "Error inesperado al registrar usuario.",
+                    detail = ex.Message
+                });
             }
         }
 
