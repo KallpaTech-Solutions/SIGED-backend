@@ -1,4 +1,4 @@
-﻿using Siged.Api.Extensions; // Importamos nuestras extensiones
+﻿using Siged.Api.Extensions;
 using Siged.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -10,7 +10,7 @@ builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 
 // Aplicamos nuestras extensiones
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddSwaggerCustom();
+builder.Services.AddSwaggerCustom(); // <-- Aquí ya tienes configurado el SecurityDefinition
 builder.Services.AddSecurityConfiguration(builder.Configuration);
 builder.Services.AddCustomCors(builder.Configuration);
 
@@ -23,11 +23,13 @@ var app = builder.Build();
 // --- PIPELINE DE MIDDLEWARE ---
 app.UseCors("AllowReactApp");
 
-if (app.Environment.IsDevelopment())
+// ✅ Swagger habilitado para TODOS los entornos (incluyendo Render)
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "SIGED - API UNAS V1");
+    c.RoutePrefix = string.Empty; // ✨ Esto hace que Swagger cargue en la raíz (https://siged-backend.onrender.com/)
+});
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();
