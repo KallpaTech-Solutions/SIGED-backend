@@ -1,27 +1,32 @@
-# ETAPA 1: Construcción
+# ETAPA 1: Construcción (SDK)
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /app
+WORKDIR /src
 
-# Copiar archivos de proyecto y restaurar dependencias
-# (Ajusta los nombres si tus .csproj se llaman diferente)
-COPY ["src/SIGED.API/SIGED.API.csproj", "src/SIGED.API/"]
-COPY ["src/SIGED.Application/SIGED.Application.csproj", "src/SIGED.Application/"]
-COPY ["src/SIGED.Domain/SIGED.Domain.csproj", "src/SIGED.Domain/"]
-COPY ["src/SIGED.Infrastructure/SIGED.Infrastructure.csproj", "src/SIGED.Infrastructure/"]
+# 1. Copiar los archivos .csproj con los nombres EXACTOS (PascalCase)
+COPY ["Siged.Api/Siged.Api.csproj", "Siged.Api/"]
+COPY ["Siged.Application/Siged.Application.csproj", "Siged.Application/"]
+COPY ["Siged.Domain/Siged.Domain.csproj", "Siged.Domain/"]
+COPY ["Siged.Infrastructure/Siged.Infrastructure.csproj", "Siged.Infrastructure/"]
 
-RUN dotnet restore "src/SIGED.API/SIGED.API.csproj"
+# 2. Restaurar dependencias
+RUN dotnet restore "Siged.Api/Siged.Api.csproj"
 
-# Copiar todo el código y compilar
+# 3. Copiar el resto del código y compilar
 COPY . .
-WORKDIR "/app/src/SIGED.API"
-RUN dotnet build "SIGED.API.csproj" -c Release -o /app/build
+WORKDIR "/src/Siged.Api"
+RUN dotnet build "Siged.Api.csproj" -c Release -o /app/build
 
 # ETAPA 2: Publicación
 FROM build AS publish
-RUN dotnet publish "SIGED.API.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "Siged.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
-# ETAPA 3: Imagen Final
+# ETAPA 3: Imagen Final (Runtime)
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "SIGED.API.dll"]
+
+# Puerto estándar de .NET 8 para contenedores en Render
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "Siged.Api.dll"]
