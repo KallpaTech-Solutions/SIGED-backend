@@ -66,8 +66,22 @@ namespace Siged.Api.Controllers.Security
             if (string.IsNullOrEmpty(expClaim)) return BadRequest();
             var fechaExp = DateTimeOffset.FromUnixTimeSeconds(long.Parse(expClaim)).UtcDateTime;
 
-            // 3. Insertar en Blacklist y Auditoría
-            // Ahora _context ya existe y no dará error
+            // 3. CAPTURA DE IP REAL (Optimizado para Render/Proxies)
+            // Render envía la IP original en el encabezado X-Forwarded-For
+            string? remoteIp = Request.Headers["X-Forwarded-For"].FirstOrDefault();
+
+            // Si hay varias IPs (separadas por coma), tomamos la primera que es la del cliente
+            if (!string.IsNullOrEmpty(remoteIp))
+            {
+                remoteIp = remoteIp.Split(',')[0].Trim();
+            }
+            else
+            {
+                // Si no estamos en Render (ej: local), usamos la conexión estándar
+                remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+            }
+
+            // 4. Insertar en Blacklist y Auditoría
             _context.TokensInvalidados.Add(new TokenInvalidado
             {
                 Token = token,
@@ -79,7 +93,7 @@ namespace Siged.Api.Controllers.Security
                 UsuarioId = userId,
                 Accion = "LOGOUT",
                 Detalle = "Cierre de sesión seguro desde el frontend",
-                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString()
+                IpAddress = remoteIp // 🚀 ¡Aquí ya guardamos la IP real!
             });
 
             await _context.SaveChangesAsync();
