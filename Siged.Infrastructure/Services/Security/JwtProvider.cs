@@ -13,7 +13,7 @@ public class JwtProvider
 
     public JwtProvider(IConfiguration config) => _config = config;
 
-    public string Generate(Usuario usuario)
+    public virtual string Generate(Usuario usuario)
     {
         var permisosRol = usuario.Rol.Permisos.Select(p => p.IdPermiso);
         var permisosEspeciales = usuario.PermisosEspeciales.Select(p => p.IdPermiso);
