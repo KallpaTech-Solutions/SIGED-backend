@@ -46,7 +46,13 @@ namespace Siged.Domain.Entities.Security
             // CATEGORÍA: COMPETENCIAS
             new(CompTournView, "Ver torneos y resultados", "COMPETENCIAS", new[] { SuperAdminId, AdminId, EncargadoId, EstudianteId }),
             new(CompTournManage, "Gestionar fechas y torneos", "COMPETENCIAS", new[] { SuperAdminId, EncargadoId }),
-        };
+
+            // CATEGORÍA: NOTICIAS
+            new(NewsView, "Ver gestión de noticias", "NOTICIAS", new[] { SuperAdminId, AdminId, EncargadoId }),
+            new(NewsCreate, "Crear borradores de noticias", "NOTICIAS", new[] { SuperAdminId, AdminId, EncargadoId }),
+            new(NewsManage, "Publicar, editar y archivar noticias", "NOTICIAS", new[] { SuperAdminId, AdminId }),
+            new(NewsHighlight, "Marcar noticias como destacadas", "NOTICIAS", new[] { SuperAdminId, AdminId }),
+         };
 
         // --- 4. CONSTANTES DE STRINGS (Para usar en [Authorize(Policy = ...)]) ---
         // Mantener estas constantes te ayuda a evitar errores de dedo en los Controladores.
@@ -61,6 +67,12 @@ namespace Siged.Domain.Entities.Security
 
         public const string CompTournView = "comp.tourn.view";
         public const string CompTournManage = "comp.tourn.manage";
+
+        // CATEGORÍA: NOTICIAS
+        public const string NewsView = "news.view";          // Ver el panel de gestión
+        public const string NewsCreate = "news.create";      // Crear borradores
+        public const string NewsManage = "news.manage";      // Publicar, editar y archivar
+        public const string NewsHighlight = "news.highlight"; // Marcar como destacada
 
         // --- 5. MÉTODOS AUXILIARES ---
         public static List<string> GetAllNames() => All.Select(p => p.Name).ToList();

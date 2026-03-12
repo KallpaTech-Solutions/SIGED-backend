@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Siged.Domain.Entities.Core;
+using Siged.Domain.Entities.Core.Notice;
 using Siged.Domain.Entities.Security;
 using Siged.Infrastructure.Persistence.Seeding;
 
@@ -22,6 +23,8 @@ namespace Siged.Infrastructure.Persistence
         public DbSet<Organizacion> Organizaciones { get; set; }
         public DbSet<TokenInvalidado> TokensInvalidados { get; set; }
         public DbSet<AuditoriaLog> AuditoriaLogs { get; set; }
+        public DbSet<News> News { get; set; }
+        public DbSet<NewsMedia> NewsMedia { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
