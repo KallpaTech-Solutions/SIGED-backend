@@ -1,8 +1,10 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.EntityFrameworkCore;
 using Siged.Api.Extensions;
+using Siged.Application.Interfaces.Almacenamiento;
 using Siged.Infrastructure;
 using Siged.Infrastructure.Persistence;
-using Microsoft.AspNetCore.HttpOverrides;
+using Siged.Infrastructure.Services.Almacenamiento;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,6 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
+builder.Services.AddHttpClient<IMediaStorageService, SupabaseMediaStorageService>();
 
 // Extensiones de arquitectura y seguridad
 builder.Services.AddInfrastructure(builder.Configuration);

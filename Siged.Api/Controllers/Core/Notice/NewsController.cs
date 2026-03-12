@@ -142,7 +142,24 @@ namespace Siged.Api.Controllers.Core.Notice
             await _context.SaveChangesAsync();
             return NoContent();
         }
+        /// <summary>
+        /// Cambia únicamente el estado de una noticia (ej. de Borrador a Publicado).
+        /// </summary>
+        [HttpPatch("{id}/status")]
+        [Authorize(Policy = Permissions.NewsManage)]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> ChangeStatus(Guid id, [FromBody] NewsStatus newStatus)
+        {
+            var news = await _context.News.FindAsync(id);
+            if (news == null) return NotFound();
 
-        
+            news.Status = newStatus;
+            news.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = $"Estado actualizado a {newStatus}", status = (int)newStatus });
+        }
+
     }
 }
