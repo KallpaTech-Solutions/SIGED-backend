@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Siged.Application.Interfaces.Almacenamiento;
 using Siged.Domain.Entities.Security;
+using Microsoft.AspNetCore.Http;
 
 namespace Siged.Api.Controllers.Core.Notice
 {
@@ -17,30 +18,40 @@ namespace Siged.Api.Controllers.Core.Notice
         }
 
         /// <summary>
-        /// Sube archivos (Fotos/Video) y devuelve las URLs de Supabase.
+        /// Sube archivos multimedia a Supabase (Máx. 50MB).
         /// </summary>
         [HttpPost("upload-noticia")]
         [Authorize(Policy = Permissions.NewsCreate)]
-        [RequestSizeLimit(52_428_800)] // 🔥 Aumentado a 50MB para soportar video
-        [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)] // Necesario para IIS/Kestrel
-        public async Task<IActionResult> UploadNoticia([FromForm(Name = "files")] IEnumerable<IFormFile> files, CancellationToken ct)
+        [RequestSizeLimit(52_428_800)] // 50MB en bytes
+        [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
+        public async Task<IActionResult> UploadNoticia(CancellationToken ct)
         {
-            if (files == null || !files.Any())
-                return BadRequest("No se recibieron archivos o el nombre del campo no es 'files'.");
+            // Leemos directamente de los archivos adjuntos en el Form
+            var files = Request.Form.Files;
+
+            if (files == null || files.Count == 0)
+            {
+                return BadRequest(new
+                {
+                    message = "No se recibieron archivos. Asegúrate de que el FormData use la clave 'files'."
+                });
+            }
 
             try
             {
-                // El servicio ya maneja la subida a Supabase
+                // El servicio procesa la subida a Supabase
                 var urls = await _mediaService.UploadNoticiasAsync(files, ct);
 
                 if (urls == null || !urls.Any())
-                    return StatusCode(500, "La subida falló en el servidor de almacenamiento.");
+                {
+                    return StatusCode(500, new { message = "Error al procesar la subida a Supabase." });
+                }
 
                 return Ok(new { urls });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Error interno: {ex.Message}");
+                return StatusCode(500, new { message = "Error interno del servidor", details = ex.Message });
             }
         }
     }

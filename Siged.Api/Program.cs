@@ -5,6 +5,7 @@ using Siged.Application.Interfaces.Almacenamiento;
 using Siged.Infrastructure;
 using Siged.Infrastructure.Persistence;
 using Siged.Infrastructure.Services.Almacenamiento;
+using Microsoft.AspNetCore.Http.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,7 +24,11 @@ builder.Services.AddCustomCors(builder.Configuration);
 // Health Checks para monitoreo en Render
 var conn = builder.Configuration.GetConnectionString("DefaultConnection")!;
 builder.Services.AddHealthChecks().AddNpgSql(conn);
-
+// Configurar límites de formulario para permitir archivos grandes (50MB)
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = 52_428_800; // 50 MB
+});
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
