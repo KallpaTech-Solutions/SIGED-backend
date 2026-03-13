@@ -24,46 +24,46 @@ namespace Siged.Api.Controllers.Core.Notice
         /// <summary>
         /// Obtiene el feed público de noticias (Solo publicadas).
         /// </summary>
-        /// <remarks>Accesible por cualquier usuario sin necesidad de login.</remarks>
         [HttpGet("feed")]
         [AllowAnonymous]
-        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> GetPublicFeed()
         {
-            var news = await _context.News
+            var newsList = await _context.News
                 .Include(n => n.Media)
                 .Where(n => n.Status == NewsStatus.Published)
                 .OrderByDescending(n => n.IsFeatured)
                 .ThenByDescending(n => n.CreatedAt)
                 .ToListAsync();
 
-            return Ok(news);
+            var response = newsList.Select(MapToResponseDto);
+            return Ok(response);
         }
 
         /// <summary>
-        /// Lista de noticias para administración (Incluye borradores y archivados).
+        /// Lista de noticias para administración (Incluye todos los estados).
         /// </summary>
         [HttpGet("admin")]
         [Authorize(Policy = Permissions.NewsView)]
-        [ProducesResponseType(StatusCodes.Status200OK)]
         public async Task<IActionResult> GetAllAdmin()
         {
-            var news = await _context.News
+            var newsList = await _context.News
                 .Include(n => n.Media)
                 .OrderByDescending(n => n.CreatedAt)
                 .ToListAsync();
-            return Ok(news);
+
+            var response = newsList.Select(MapToResponseDto);
+            return Ok(response);
         }
 
         /// <summary>
-        /// Crea una nueva noticia con generación automática de Slug.
+        /// Crea una nueva noticia.
         /// </summary>
         [HttpPost]
         [Authorize(Policy = Permissions.NewsCreate)]
-        [ProducesResponseType(StatusCodes.Status201Created)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> Create([FromBody] NewsCreateDto dto)
         {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
             var news = new News
             {
                 Title = dto.Title,
@@ -82,29 +82,29 @@ namespace Siged.Api.Controllers.Core.Notice
             if (dto.MediaUrls != null)
             {
                 foreach (var url in dto.MediaUrls)
+                {
                     news.Media.Add(new NewsMedia { Url = url, MediaType = "image" });
+                }
             }
 
             _context.News.Add(news);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetPublicFeed), new { id = news.Id }, news);
+            return CreatedAtAction(nameof(GetPublicFeed), new { id = news.Id }, MapToResponseDto(news));
         }
 
         /// <summary>
-        /// Actualiza o Archiva una noticia existente.
+        /// Actualiza una noticia existente.
         /// </summary>
         [HttpPut("{id}")]
         [Authorize(Policy = Permissions.NewsManage)]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Update(Guid id, [FromBody] NewsUpdateDto dto)
         {
             var news = await _context.News.Include(n => n.Media).FirstOrDefaultAsync(x => x.Id == id);
             if (news == null) return NotFound();
 
             news.Title = dto.Title;
-            news.Slug = News.GenerateSlug(dto.Title); // Actualiza slug si el título cambió
+            news.Slug = News.GenerateSlug(dto.Title);
             news.Excerpt = dto.Excerpt;
             news.Content = dto.Content;
             news.Category = dto.Category;
@@ -112,27 +112,28 @@ namespace Siged.Api.Controllers.Core.Notice
             news.IsFeatured = dto.IsFeatured;
             news.AllowComments = dto.AllowComments;
             news.AllowReactions = dto.AllowReactions;
-            news.Status = dto.Status; // Aquí manejamos "Archivar" cambiando a NewsStatus.Archived
+            news.Status = dto.Status;
             news.UpdatedAt = DateTime.UtcNow;
 
-            // Simple actualización de media (puedes mejorar esto eliminando/agregando)
+            // Actualización de Media: Eliminamos anteriores y agregamos los nuevos links de Supabase
             if (dto.MediaUrls != null)
             {
                 _context.NewsMedia.RemoveRange(news.Media);
                 foreach (var url in dto.MediaUrls)
+                {
                     news.Media.Add(new NewsMedia { Url = url, MediaType = "image" });
+                }
             }
 
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Noticia actualizada con éxito", slug = news.Slug });
+            return Ok(MapToResponseDto(news));
         }
 
         /// <summary>
-        /// Elimina físicamente una noticia y sus archivos asociados.
+        /// Elimina físicamente una noticia.
         /// </summary>
         [HttpDelete("{id}")]
         [Authorize(Policy = Permissions.NewsManage)]
-        [ProducesResponseType(StatusCodes.Status204NoContent)]
         public async Task<IActionResult> Delete(Guid id)
         {
             var news = await _context.News.FindAsync(id);
@@ -142,13 +143,12 @@ namespace Siged.Api.Controllers.Core.Notice
             await _context.SaveChangesAsync();
             return NoContent();
         }
+
         /// <summary>
-        /// Cambia únicamente el estado de una noticia (ej. de Borrador a Publicado).
+        /// Cambia rápidamente el estado (Publicado/Borrador/Archivado).
         /// </summary>
         [HttpPatch("{id}/status")]
         [Authorize(Policy = Permissions.NewsManage)]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> ChangeStatus(Guid id, [FromBody] NewsStatus newStatus)
         {
             var news = await _context.News.FindAsync(id);
@@ -161,5 +161,65 @@ namespace Siged.Api.Controllers.Core.Notice
             return Ok(new { message = $"Estado actualizado a {newStatus}", status = (int)newStatus });
         }
 
+        // 🛡️ MÉTODO PRIVADO DE MAPEO: Rompe la referencia circular y limpia la respuesta
+        private static NewsResponseDto MapToResponseDto(News news)
+        {
+            return new NewsResponseDto
+            {
+                Id = news.Id,
+                Title = news.Title,
+                Excerpt = news.Excerpt,
+                Content = news.Content,
+                Category = news.Category,
+                Tags = news.Tags,
+                IsFeatured = news.IsFeatured,
+                AllowComments = news.AllowComments,
+                AllowReactions = news.AllowReactions,
+                Status = news.Status,
+                CreatedAt = news.CreatedAt,
+                ViewCount = news.ViewCount,
+                Slug = news.Slug,
+                // Extraemos solo los strings de las URLs para evitar el bucle infinito del JSON
+                MediaUrls = news.Media.Select(m => m.Url).ToList()
+            };
+        }
+
+        /// <summary>
+        /// Obtiene una noticia detallada por su Slug (Ideal para el Frontend público).
+        /// </summary>
+        [HttpGet("{slug}")]
+        [AllowAnonymous]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetBySlug(string slug)
+        {
+            var news = await _context.News
+                .Include(n => n.Media)
+                .FirstOrDefaultAsync(n => n.Slug == slug);
+
+            if (news == null) return NotFound(new { message = "La noticia no existe." });
+
+            // Opcional: Aumentar contador de visitas
+            news.ViewCount++;
+            await _context.SaveChangesAsync();
+
+            return Ok(MapToResponseDto(news));
+        }
+
+        /// <summary>
+        /// Obtiene una noticia detallada por su ID (Ideal para edición en Admin).
+        /// </summary>
+        [HttpGet("id/{id}")]
+        [Authorize(Policy = Permissions.NewsView)]
+        public async Task<IActionResult> GetById(Guid id)
+        {
+            var news = await _context.News
+                .Include(n => n.Media)
+                .FirstOrDefaultAsync(n => n.Id == id);
+
+            if (news == null) return NotFound();
+
+            return Ok(MapToResponseDto(news));
+        }
     }
 }
