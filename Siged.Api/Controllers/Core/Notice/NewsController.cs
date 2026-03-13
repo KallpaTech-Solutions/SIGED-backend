@@ -28,15 +28,12 @@ namespace Siged.Api.Controllers.Core.Notice
         [AllowAnonymous]
         public async Task<IActionResult> GetPublicFeed()
         {
-            var newsList = await _context.News
-                .Include(n => n.Media)
+            var newsList = await _context.News.Include(n => n.Media)
                 .Where(n => n.Status == NewsStatus.Published)
-                .OrderByDescending(n => n.IsFeatured)
-                .ThenByDescending(n => n.CreatedAt)
+                .OrderByDescending(n => n.IsFeatured).ThenByDescending(n => n.CreatedAt)
                 .ToListAsync();
 
-            var response = newsList.Select(MapToResponseDto);
-            return Ok(response);
+            return Ok(newsList.Select(MapToResponseDto));
         }
 
         /// <summary>
@@ -82,15 +79,14 @@ namespace Siged.Api.Controllers.Core.Notice
             if (dto.MediaUrls != null)
             {
                 foreach (var url in dto.MediaUrls)
-                {
                     news.Media.Add(new NewsMedia { Url = url, MediaType = "image" });
-                }
             }
 
             _context.News.Add(news);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetPublicFeed), new { id = news.Id }, MapToResponseDto(news));
+            // ✅ CORRECCIÓN VITAL: Ahora apuntamos a GetById pasándole su ID
+            return CreatedAtAction(nameof(GetById), new { id = news.Id }, MapToResponseDto(news));
         }
 
         /// <summary>
@@ -128,6 +124,7 @@ namespace Siged.Api.Controllers.Core.Notice
             await _context.SaveChangesAsync();
             return Ok(MapToResponseDto(news));
         }
+
 
         /// <summary>
         /// Elimina físicamente una noticia.
@@ -189,37 +186,31 @@ namespace Siged.Api.Controllers.Core.Notice
         /// </summary>
         [HttpGet("{slug}")]
         [AllowAnonymous]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetBySlug(string slug)
         {
-            var news = await _context.News
-                .Include(n => n.Media)
-                .FirstOrDefaultAsync(n => n.Slug == slug);
+            // Evitamos que entre aquí si por error mandan "id" o "feed"
+            if (slug == "feed" || slug == "admin") return NotFound();
 
+            var news = await _context.News.Include(n => n.Media).FirstOrDefaultAsync(n => n.Slug == slug);
             if (news == null) return NotFound(new { message = "La noticia no existe." });
 
-            // Opcional: Aumentar contador de visitas
             news.ViewCount++;
             await _context.SaveChangesAsync();
-
             return Ok(MapToResponseDto(news));
         }
 
         /// <summary>
         /// Obtiene una noticia detallada por su ID (Ideal para edición en Admin).
         /// </summary>
-        [HttpGet("id/{id}")]
-        [Authorize(Policy = Permissions.NewsView)]
+        [HttpGet("{id:guid}")]
+        [AllowAnonymous]
         public async Task<IActionResult> GetById(Guid id)
         {
-            var news = await _context.News
-                .Include(n => n.Media)
-                .FirstOrDefaultAsync(n => n.Id == id);
-
+            var news = await _context.News.Include(n => n.Media).FirstOrDefaultAsync(n => n.Id == id);
             if (news == null) return NotFound();
-
             return Ok(MapToResponseDto(news));
         }
+
+
     }
 }
