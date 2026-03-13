@@ -68,6 +68,7 @@ using (var scope = app.Services.CreateScope())
 
 // PIPELINE DE MIDDLEWARE
 app.UseForwardedHeaders();
+app.UseRouting();
 app.UseCors("AllowReactApp");
 
 // Swagger habilitado en la raíz para facilitar pruebas

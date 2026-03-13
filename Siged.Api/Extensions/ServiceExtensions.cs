@@ -92,14 +92,29 @@ public static class ServiceExtensions
     {
         services.AddCors(options => {
             options.AddPolicy("AllowReactApp", policy => {
-                var origins = config.GetSection("AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-                var devOrigins = new[] { "https://localhost:5173", "http://localhost:5173" };
-                policy.WithOrigins(origins.Concat(devOrigins).ToArray())
-                      .AllowAnyMethod().AllowAnyHeader().AllowCredentials();
+                // Intentamos leer la lista, pero si falla, usamos un fallback
+                var originsFromConfig = config.GetSection("AllowedOrigins").Get<string[]>();
+
+                var allowedList = new List<string> {
+                "https://siged-unas.tech",
+                "https://www.siged-unas.tech",
+                "https://localhost:5173",
+                "http://localhost:5173"
+            };
+
+                if (originsFromConfig != null)
+                {
+                    allowedList.AddRange(originsFromConfig);
+                }
+
+                policy.WithOrigins(allowedList.Distinct().ToArray()) // Evita duplicados
+                      .AllowAnyMethod()
+                      .AllowAnyHeader()
+                      .AllowCredentials();
             });
         });
         return services;
     }
 
-    
+
 }
