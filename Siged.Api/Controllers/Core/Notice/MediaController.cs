@@ -22,32 +22,22 @@ namespace Siged.Api.Controllers.Core.Notice
         /// </summary>
         [HttpPost("upload-noticia")]
         [Authorize(Policy = Permissions.NewsCreate)]
-        [DisableRequestSizeLimit]
-        public async Task<IActionResult> UploadNoticia(CancellationToken ct)
+        public async Task<IActionResult> UploadNoticia([FromForm] IFormFileCollection files, CancellationToken ct)
         {
-            try
+            // Usar IFormFileCollection con [FromForm] es la forma más "limpia" 
+            // para que .NET mapee automáticamente el multipart/form-data.
+
+            if (files == null || files.Count == 0)
             {
-                // 1. Verificamos si es un formulario válido
-                if (!Request.HasFormContentType)
-                    return BadRequest("La petición no es un formulario válido (multipart/form-data).");
-
-                var files = Request.Form.Files;
-
-                if (files == null || files.Count == 0)
-                    return BadRequest("No se recibieron archivos en el campo 'files'.");
-
-                // 2. Llamada al servicio
-                var urls = await _mediaService.UploadNoticiasAsync(files, ct);
-
-                return Ok(new { urls });
+                // Si el binder falla, intentamos leerlo manualmente de la request como último recurso
+                files = (IFormFileCollection)Request.Form.Files;
             }
-            catch (Exception ex)
-            {
-                // Esto nos permitirá ver el error real en los logs de Render
-                Console.WriteLine($"🔥 ERROR CRÍTICO EN MEDIA: {ex.Message}");
-                Console.WriteLine($"🔥 STACKTRACE: {ex.StackTrace}");
-                return StatusCode(500, new { message = "Error interno", detail = ex.Message });
-            }
+
+            if (files.Count == 0)
+                return BadRequest("No se recibieron archivos en el campo 'files'.");
+
+            var urls = await _mediaService.UploadNoticiasAsync(files, ct);
+            return Ok(new { urls });
         }
     }
 }
