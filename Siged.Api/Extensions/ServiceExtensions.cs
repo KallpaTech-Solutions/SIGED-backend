@@ -110,7 +110,8 @@ public static class ServiceExtensions
                 policy.WithOrigins(allowedList.Distinct().ToArray()) // Evita duplicados
                       .AllowAnyMethod()
                       .AllowAnyHeader()
-                      .AllowCredentials();
+                      .AllowCredentials()
+                      .SetIsOriginAllowedToAllowWildcardSubdomains();
             });
         });
         return services;

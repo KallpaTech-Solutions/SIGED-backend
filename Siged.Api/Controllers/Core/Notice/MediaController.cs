@@ -22,36 +22,31 @@ namespace Siged.Api.Controllers.Core.Notice
         /// </summary>
         [HttpPost("upload-noticia")]
         [Authorize(Policy = Permissions.NewsCreate)]
-        [RequestSizeLimit(52_428_800)] // 50MB en bytes
-        [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
+        [DisableRequestSizeLimit]
         public async Task<IActionResult> UploadNoticia(CancellationToken ct)
         {
-            // Leemos directamente de los archivos adjuntos en el Form
-            var files = Request.Form.Files;
-
-            if (files == null || files.Count == 0)
-            {
-                return BadRequest(new
-                {
-                    message = "No se recibieron archivos. Asegúrate de que el FormData use la clave 'files'."
-                });
-            }
-
             try
             {
-                // El servicio procesa la subida a Supabase
-                var urls = await _mediaService.UploadNoticiasAsync(files, ct);
+                // 1. Verificamos si es un formulario válido
+                if (!Request.HasFormContentType)
+                    return BadRequest("La petición no es un formulario válido (multipart/form-data).");
 
-                if (urls == null || !urls.Any())
-                {
-                    return StatusCode(500, new { message = "Error al procesar la subida a Supabase." });
-                }
+                var files = Request.Form.Files;
+
+                if (files == null || files.Count == 0)
+                    return BadRequest("No se recibieron archivos en el campo 'files'.");
+
+                // 2. Llamada al servicio
+                var urls = await _mediaService.UploadNoticiasAsync(files, ct);
 
                 return Ok(new { urls });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "Error interno del servidor", details = ex.Message });
+                // Esto nos permitirá ver el error real en los logs de Render
+                Console.WriteLine($"🔥 ERROR CRÍTICO EN MEDIA: {ex.Message}");
+                Console.WriteLine($"🔥 STACKTRACE: {ex.StackTrace}");
+                return StatusCode(500, new { message = "Error interno", detail = ex.Message });
             }
         }
     }

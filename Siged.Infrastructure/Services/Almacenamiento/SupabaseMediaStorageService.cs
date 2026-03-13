@@ -1,7 +1,8 @@
-﻿using System.Net.Http.Headers;
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Siged.Application.Interfaces.Almacenamiento;
+using System;
+using System.Net.Http.Headers;
 
 namespace Siged.Infrastructure.Services.Almacenamiento
 {
@@ -22,6 +23,7 @@ namespace Siged.Infrastructure.Services.Almacenamiento
 
             // Leemos las variables que pusiste en Render
             var baseUrl = _config["Supabase:Url"];
+            if (string.IsNullOrEmpty(baseUrl)) throw new Exception("¡LA URL DE SUPABASE NO ESTÁ LLEGANDO AL CÓDIGO!");
             var key = _config["Supabase:ServiceKey"];
             var bucket = _config["Supabase:BucketNoticias"];
 
