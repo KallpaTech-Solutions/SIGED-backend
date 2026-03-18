@@ -19,7 +19,7 @@ namespace Siged.Domain.Entities.Core.Notice
         [Required]
         public string Content { get; set; } = string.Empty; // Cuerpo de la noticia
 
-        public string Category { get; set; } = "Institucional";
+        public NoticiaCategoria Category { get; set; } = NoticiaCategoria.Institucional;
 
         public string Tags { get; set; } = string.Empty;
 

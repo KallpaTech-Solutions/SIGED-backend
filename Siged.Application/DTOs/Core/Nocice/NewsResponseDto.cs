@@ -8,7 +8,7 @@ namespace Siged.Application.DTOs.Core.Nocice
         public string Title { get; set; } = string.Empty;
         public string Excerpt { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
-        public string Category { get; set; } = "Institucional";
+        public NoticiaCategoria Category { get; set; } 
         public string Tags { get; set; } = string.Empty;
         public bool IsFeatured { get; set; }
         public bool AllowComments { get; set; }

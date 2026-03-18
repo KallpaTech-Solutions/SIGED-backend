@@ -13,7 +13,7 @@ namespace Siged.Application.DTOs.Core.Nocice
         [Required] public string Title { get; set; } = string.Empty;
         [Required] public string Excerpt { get; set; } = string.Empty;
         [Required] public string Content { get; set; } = string.Empty;
-        public string Category { get; set; } = "Institucional";
+        public NoticiaCategoria Category { get; set; } = NoticiaCategoria.Institucional;
         public string Tags { get; set; } = string.Empty;
         public bool IsFeatured { get; set; }
         public bool AllowComments { get; set; } = true;
