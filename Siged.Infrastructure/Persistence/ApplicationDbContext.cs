@@ -25,6 +25,7 @@ namespace Siged.Infrastructure.Persistence
         public DbSet<AuditoriaLog> AuditoriaLogs { get; set; }
         public DbSet<News> News { get; set; }
         public DbSet<NewsMedia> NewsMedia { get; set; }
+        public DbSet<UserPreference> UserPreferences { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);

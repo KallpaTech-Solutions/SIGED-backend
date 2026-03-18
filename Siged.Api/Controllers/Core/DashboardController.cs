@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Siged.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using Siged.Application.DTOs.Core;
 
 namespace Siged.Api.Controllers.Admin
 {
@@ -18,80 +19,50 @@ namespace Siged.Api.Controllers.Admin
 
         public DashboardController(ApplicationDbContext context) => _context = context;
 
-        /// <summary>
-        /// Obtiene el resumen de estadísticas del sistema adaptado al rol del usuario autenticado.
-        /// </summary>
-        /// <remarks>
-        /// 💡 **Comportamiento Dinámico:**
-        /// - **SuperAdmin / Admin:** Retorna métricas globales (Total de usuarios, facultades, etc.).
-        /// - **Encargado:** Retorna métricas específicas de la facultad a la que pertenece.
-        /// - **Estudiante:** Retorna un resumen personal (equipos inscritos, faltas, etc.).
-        /// </remarks>
-        /// <response code="200">Resumen obtenido exitosamente. El esquema del JSON varía según el rol.</response>
-        /// <response code="401">El token de sesión es inválido o ha expirado.</response>
-        /// <response code="403">El usuario tiene un rol no reconocido por el sistema.</response>
         [HttpGet("summary")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        public async Task<IActionResult> GetSummary()
+        public async Task<IActionResult> GetSummary([FromQuery] string? blocks)
         {
-            // 1. Identificamos quién está pidiendo la información
-            var rol = User.FindFirst(ClaimTypes.Role)?.Value;
-            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            int.TryParse(userIdString, out int userId);
-
-            // 2. Si es SUPERADMIN o ADMIN, ven todo el panorama de la UNAS
-            if (rol == "SuperAdmin" || rol == "Admin")
+            try
             {
-                var totalUsuarios = await _context.Usuarios.CountAsync();
-                var totalFacultades = await _context.Organizaciones.CountAsync();
-                var usuariosActivos = await _context.Usuarios.CountAsync(u => u.EstaActivo);
+                var userIdString = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (!int.TryParse(userIdString, out int userId)) return Unauthorized();
 
-                return Ok(new
+                // 1. Obtener preferencias de la DB si no se pasan por URL
+                if (string.IsNullOrEmpty(blocks))
                 {
-                    TipoVista = "Global",
-                    TotalUsuarios = totalUsuarios,
-                    TotalFacultades = totalFacultades,
-                    UsuariosActivos = usuariosActivos,
-                    TotalTorneos = 0, // Por implementar
-                    UltimosUsuarios = await _context.Usuarios
-                        .OrderByDescending(u => u.Id)
-                        .Take(5)
-                        .Select(u => u.Username)
-                        .ToListAsync()
-                });
-            }
+                    var pref = await _context.UserPreferences.AsNoTracking()
+                        .FirstOrDefaultAsync(p => p.UserId == userId);
+                    blocks = pref?.WidgetsVisibles ?? "all";
+                }
 
-            // 3. Si es ENCARGADO, solo ve lo de su Facultad
-            if (rol == "Encargado")
+                var requested = blocks.ToLower().Split(',');
+                var isAll = requested.Contains("all");
+                var result = new Dictionary<string, object>();
+
+                // 2. Filtrado por Permisos + Preferencias
+                // Bloque Usuarios
+                if (User.HasClaim("permission", "security.user.view"))
+                {
+                    if (isAll || requested.Contains("usuarios"))
+                        result["totalUsuarios"] = await _context.Usuarios.CountAsync();
+
+                    if (isAll || requested.Contains("activos"))
+                        result["usuariosActivos"] = await _context.Usuarios.CountAsync(u => u.EstaActivo);
+                }
+
+                // Bloque Organizaciones
+                if (User.HasClaim("permission", "core.org.view"))
+                {
+                    if (isAll || requested.Contains("orgs") || requested.Contains("organizaciones"))
+                        result["totalFacultades"] = await _context.Organizaciones.CountAsync();
+                }
+
+                return Ok(result);
+            }
+            catch (Exception ex)
             {
-                // Buscamos a qué organización pertenece el encargado
-                var usuario = await _context.Usuarios.FindAsync(userId);
-
-                return Ok(new
-                {
-                    TipoVista = "Facultad",
-                    Mensaje = "Bienvenido a la gestión de tu Facultad",
-                    TorneosActivos = 0, // Torneos de su facultad (por implementar)
-                    EquiposInscritos = 0 // Equipos de su facultad (por implementar)
-                });
+                return StatusCode(500, new { error = ex.Message });
             }
-
-            // 4. Si es ESTUDIANTE, ve su perfil y sus equipos
-            if (rol == "Estudiante")
-            {
-                return Ok(new
-                {
-                    TipoVista = "Personal",
-                    Mensaje = "Bienvenido a tu panel de estudiante",
-                    MisEquipos = 0,
-                    MisFaltas = 0
-                });
-            }
-
-            // 5. Si el rol no hace match con nada, acceso denegado
-            return Forbid();
         }
     }
 }

@@ -25,33 +25,55 @@ namespace Siged.Infrastructure.Services.Security
         /// </summary>
         public async Task<LoginResponseDto?> LoginAsync(string username, string password)
         {
-            
-            var usuario = await _context.Usuarios
-                .Include(u => u.Persona)
-                .Include(u => u.Rol)
-                    .ThenInclude(r => r.Permisos) // Carga permisos heredados del Rol
-                .Include(u => u.PermisosEspeciales) // Carga permisos asignados "a dedo"
-                .FirstOrDefaultAsync(u => u.Username == username);
+            // 1. Buscamos solo los campos necesarios (Proyección)
+            var datosUsuario = await _context.Usuarios
+                .AsNoTracking() // 👈 No necesitamos rastrear cambios para un login
+                .Where(u => u.Username == username)
+                .Select(u => new
+                {
+                    u.Id,
+                    u.Username,
+                    u.PasswordHash,
+                    u.EstaActivo,
+                    u.RequiereCambioPassword,
+                    Nombre = u.Persona.Nombres,
+                    Apellido = u.Persona.Apellidos,
+                    RolNombre = u.Rol.Nombre,
+                    // Solo los nombres de los permisos (no el objeto completo)
+                    Permisos = u.Rol.Permisos.Select(p => p.IdPermiso).ToList(),
+                    PermisosEspeciales = u.PermisosEspeciales.Select(p => p.IdPermiso).ToList()
+                })
+                .FirstOrDefaultAsync();
 
-            if (usuario == null) return null;
+            if (datosUsuario == null) return null;
 
-            if (!usuario.EstaActivo)
-            {
-                throw new UnauthorizedAccessException("Tu cuenta ha sido desactivada. Por favor, contacta a la OTI.");
-            }
+            // 2. Validaciones de estado y password
+            if (!datosUsuario.EstaActivo)
+                throw new UnauthorizedAccessException("Tu cuenta ha sido desactivada.");
 
-            bool isPasswordValid = _passwordHasher.Verify(password, usuario.PasswordHash);
-            if (!isPasswordValid) return null;
+            if (!_passwordHasher.Verify(password, datosUsuario.PasswordHash))
+                return null;
 
-            var token = _jwtProvider.Generate(usuario);
+            // 3. Generamos el Token
+            // Nota: Aquí tendrías que ajustar tu JwtProvider para que reciba estos datos
+            // o crear un objeto Usuario temporal solo con lo necesario.
+            var todosLosPermisos = datosUsuario.Permisos.Concat(datosUsuario.PermisosEspeciales).Distinct().ToList();
+
+            var token = _jwtProvider.Generate(
+                datosUsuario.Id,
+                datosUsuario.Username,
+                datosUsuario.RolNombre,
+                todosLosPermisos,
+                datosUsuario.RequiereCambioPassword
+            );
 
             return new LoginResponseDto
             {
                 Token = token,
-                Username = usuario.Username,
-                Rol = usuario.Rol.Nombre,
-                NombreCompleto = $"{usuario.Persona.Nombres} {usuario.Persona.Apellidos}".Trim(),
-                RequiereCambioPassword = usuario.RequiereCambioPassword
+                Username = datosUsuario.Username,
+                Rol = datosUsuario.RolNombre,
+                NombreCompleto = $"{datosUsuario.Nombre} {datosUsuario.Apellido}".Trim(),
+                RequiereCambioPassword = datosUsuario.RequiereCambioPassword
             };
         }
     }

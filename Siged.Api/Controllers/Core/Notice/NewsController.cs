@@ -90,39 +90,63 @@ namespace Siged.Api.Controllers.Core.Notice
         }
 
         /// <summary>
-        /// Actualiza una noticia existente.
+        /// Actualiza una noticia existente y gestiona sus imágenes en la nube.
         /// </summary>
         [HttpPut("{id}")]
         [Authorize(Policy = Permissions.NewsManage)]
         public async Task<IActionResult> Update(Guid id, [FromBody] NewsUpdateDto dto)
         {
-            var news = await _context.News.Include(n => n.Media).FirstOrDefaultAsync(x => x.Id == id);
-            if (news == null) return NotFound();
+            // Si llegamos aquí, el mapeo de tu front funcionó (JSON -> DTO OK)
+            if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            news.Title = dto.Title;
-            news.Slug = News.GenerateSlug(dto.Title);
-            news.Excerpt = dto.Excerpt;
-            news.Content = dto.Content;
-            news.Category = dto.Category;
-            news.Tags = dto.Tags;
-            news.IsFeatured = dto.IsFeatured;
-            news.AllowComments = dto.AllowComments;
-            news.AllowReactions = dto.AllowReactions;
-            news.Status = dto.Status;
-            news.UpdatedAt = DateTime.UtcNow;
+            var news = await _context.News
+                .Include(n => n.Media)
+                .FirstOrDefaultAsync(x => x.Id == id);
 
-            // Actualización de Media: Eliminamos anteriores y agregamos los nuevos links de Supabase
-            if (dto.MediaUrls != null)
+            if (news == null) return NotFound(new { message = "Noticia no encontrada en la base de datos." });
+
+            try
             {
-                _context.NewsMedia.RemoveRange(news.Media);
-                foreach (var url in dto.MediaUrls)
-                {
-                    news.Media.Add(new NewsMedia { Url = url, MediaType = "image" });
-                }
-            }
+                // 1. Actualización de propiedades escalares
+                _context.Entry(news).CurrentValues.SetValues(dto);
+                news.Slug = News.GenerateSlug(dto.Title);
+                news.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
-            return Ok(MapToResponseDto(news));
+                // 2. GESTIÓN DE MEDIA (El punto de fallo)
+                if (dto.MediaUrls != null)
+                {
+                    // Borramos los registros de media actuales del contexto
+                    // Esto es más directo que Clear() para evitar problemas de tracking
+                    _context.NewsMedia.RemoveRange(news.Media);
+
+                    // Creamos los nuevos objetos
+                    var nuevasImagenes = dto.MediaUrls.Select(url => new NewsMedia
+                    {
+                        Id = Guid.NewGuid(), // Siempre ID nuevo
+                        Url = url,
+                        MediaType = "image",
+                        NewsId = id
+                    }).ToList();
+
+                    // Los añadimos directamente al contexto
+                    await _context.NewsMedia.AddRangeAsync(nuevasImagenes);
+                }
+
+                // 3. Un solo guardado para toda la transacción
+                await _context.SaveChangesAsync();
+
+                return Ok(MapToResponseDto(news));
+            }
+            catch (Exception ex)
+            {
+                // Esto es lo que debes mirar en la pestaña "Response" de tu navegador
+                var detailedError = ex.InnerException?.Message ?? ex.Message;
+                return StatusCode(500, new
+                {
+                    error = "Fallo en la persistencia de datos",
+                    details = detailedError
+                });
+            }
         }
 
 

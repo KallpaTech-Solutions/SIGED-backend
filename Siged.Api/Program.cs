@@ -21,6 +21,11 @@ builder.Services.AddSwaggerCustom();
 builder.Services.AddSecurityConfiguration(builder.Configuration);
 builder.Services.AddCustomCors(builder.Configuration);
 
+
+// --- DEBUG: Añade esto temporalmente ---
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+Console.WriteLine($"🔍 CADENA ACTIVA: {connectionString}");
+// ---------------------------------------
 // Health Checks para monitoreo en Render
 var conn = builder.Configuration.GetConnectionString("DefaultConnection")!;
 builder.Services.AddHealthChecks().AddNpgSql(conn);
@@ -40,7 +45,7 @@ var app = builder.Build();
 
 // --- 2. BLOQUE DE AUTO-MIGRACIÓN Y SEEDING ---
 // Este bloque asegura que Supabase tenga las tablas y datos al arrancar
-using (var scope = app.Services.CreateScope())
+/*using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
     try
@@ -65,7 +70,7 @@ using (var scope = app.Services.CreateScope())
         logger.LogError(ex, "❌ Ocurrió un error al migrar la base de datos.");
     }
 }
-
+*/
 // PIPELINE DE MIDDLEWARE
 app.UseForwardedHeaders();
 app.UseRouting();
