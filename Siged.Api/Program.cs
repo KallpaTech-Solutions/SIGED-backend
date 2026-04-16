@@ -1,11 +1,13 @@
-﻿using Microsoft.AspNetCore.HttpOverrides;
+﻿using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Siged.Api.Extensions;
+using Siged.Api.Hubs;
 using Siged.Application.Interfaces.Almacenamiento;
 using Siged.Infrastructure;
 using Siged.Infrastructure.Persistence;
 using Siged.Infrastructure.Services.Almacenamiento;
-using Microsoft.AspNetCore.Http.Features;
+using Siged.Infrastructure.Services.Tournment;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,6 +16,9 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 builder.Services.AddHttpClient<IMediaStorageService, SupabaseMediaStorageService>();
+builder.Services.AddScoped<FixtureService>();
+builder.Services.AddSignalR();
+builder.Services.AddScoped<StandingsService>();
 
 // Extensiones de arquitectura y seguridad
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -75,6 +80,7 @@ var app = builder.Build();
 app.UseForwardedHeaders();
 app.UseRouting();
 app.UseCors("AllowReactApp");
+app.MapHub<TournamentHub>("/tournamentHub");
 
 // Swagger habilitado en la raíz para facilitar pruebas
 app.UseSwagger();

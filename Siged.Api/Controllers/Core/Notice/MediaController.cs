@@ -36,7 +36,7 @@ namespace Siged.Api.Controllers.Core.Notice
             if (files.Count == 0)
                 return BadRequest("No se recibieron archivos en el campo 'files'.");
 
-            var urls = await _mediaService.UploadNoticiasAsync(files, ct);
+            var urls = await _mediaService.UploadFilesAsync(files, "noticias", ct);
             return Ok(new { urls });
         }
     }

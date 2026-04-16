@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Siged.Domain.Entities.Core;
-using Siged.Domain.Entities.Security; // Asegúrate de que Permissions esté aquí
+using Siged.Domain.Entities.Core.Tournaments;
+using Siged.Domain.Entities.Security; 
 
 namespace Siged.Infrastructure.Persistence.Seeding;
 
@@ -117,6 +118,43 @@ public static class ModelBuilderExtensions
                 PasswordHash = "$2a$12$eL7jdgl1iOF508ePe1ScyOrYqdzdDedn1yo5WuGrj1E1.ZovUk0Xe",
                 FechaRegistro = new DateTime(2026, 3, 5, 0, 0, 0, DateTimeKind.Utc)
             }
+        );
+    }
+
+    public static void SeedTournaments(this ModelBuilder modelBuilder)
+    {
+        // ✅ IDs REALES (Solo contienen 0-9 y a-f)
+        var futbolId = Guid.Parse("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c");
+        var futsalId = Guid.Parse("1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d");
+        var voleyId = Guid.Parse("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e");
+        var basquetId = Guid.Parse("c1d2e3f4-a5b6-4c8d-9e0f-1a2b3c4d5e6f");
+
+        // 2. DISCIPLINAS
+        modelBuilder.Entity<Discipline>().HasData(
+            new Discipline { Id = futbolId, Name = "Fútbol", IconUrl = "soccer-ball" },
+            new Discipline { Id = futsalId, Name = "Futsal", IconUrl = "futsal-pitch" },
+            new Discipline { Id = voleyId, Name = "Vóley", IconUrl = "volleyball" },
+            new Discipline { Id = basquetId, Name = "Básquet", IconUrl = "basketball" }
+        );
+
+        // 3. REGLAS
+        modelBuilder.Entity<DisciplineRule>().HasData(
+            // Fútbol
+            new DisciplineRule { Id = Guid.NewGuid(), DisciplineId = futbolId, RuleKey = "TIENE_TARJETAS", RuleValue = "True" },
+            new DisciplineRule { Id = Guid.NewGuid(), DisciplineId = futbolId, RuleKey = "PUNTOS_POR_VICTORIA", RuleValue = "3" },
+
+            // Vóley
+            new DisciplineRule { Id = Guid.NewGuid(), DisciplineId = voleyId, RuleKey = "USA_SETS", RuleValue = "True" },
+            new DisciplineRule { Id = Guid.NewGuid(), DisciplineId = voleyId, RuleKey = "PUNTOS_POR_VICTORIA", RuleValue = "2" },
+
+            // Básquet
+            new DisciplineRule { Id = Guid.NewGuid(), DisciplineId = basquetId, RuleKey = "CANTIDAD_PERIODOS", RuleValue = "4" }
+        );
+
+        // 4. SEDES
+        modelBuilder.Entity<Venue>().HasData(
+            new Venue { Id = Guid.NewGuid(), Name = "Estadio Universitario UNAS", Capacity = 5000, Address = "Campus Principal" },
+            new Venue { Id = Guid.NewGuid(), Name = "Losa Deportiva FIIS", Capacity = 200, Address = "Pabellón de Sistemas" }
         );
     }
 }

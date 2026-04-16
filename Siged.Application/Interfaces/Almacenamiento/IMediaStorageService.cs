@@ -1,15 +1,17 @@
-﻿
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 
 namespace Siged.Application.Interfaces.Almacenamiento
 {
     public interface IMediaStorageService
     {
         /// <summary>
-        /// Sube una lista de archivos al storage y devuelve sus URLs públicas.
+        /// Sube un archivo individual a un bucket específico.
         /// </summary>
-        /// <param name="files">Lista de archivos recibidos por el controlador.</param>
-        /// <param name="ct">Token de cancelación.</param>
-        Task<IReadOnlyList<string>> UploadNoticiasAsync(IEnumerable<IFormFile> files, CancellationToken ct = default);
+        Task<string> UploadFileAsync(IFormFile file, string bucketName, CancellationToken ct = default);
+
+        /// <summary>
+        /// Sube múltiples archivos y devuelve la lista de URLs.
+        /// </summary>
+        Task<IReadOnlyList<string>> UploadFilesAsync(IEnumerable<IFormFile> files, string bucketName, CancellationToken ct = default);
     }
 }

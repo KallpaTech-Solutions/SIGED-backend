@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Siged.Domain.Entities.Core;
 using Siged.Domain.Entities.Core.Notice;
+using Siged.Domain.Entities.Core.Tournaments;
 using Siged.Domain.Entities.Security;
 using Siged.Infrastructure.Persistence.Seeding;
 
@@ -26,6 +27,20 @@ namespace Siged.Infrastructure.Persistence
         public DbSet<News> News { get; set; }
         public DbSet<NewsMedia> NewsMedia { get; set; }
         public DbSet<UserPreference> UserPreferences { get; set; }
+        // --- Torneos y Competencia ---
+        public DbSet<Tournament> Tournaments { get; set; }
+        public DbSet<Phase> Phases { get; set; }
+        public DbSet<Group> Groups { get; set; }
+        public DbSet<Journal> Journals { get; set; }
+        public DbSet<Match> Matches { get; set; }
+        public DbSet<MatchEvent> MatchEvents { get; set; }
+        public DbSet<Discipline> Disciplines { get; set; }
+        public DbSet<DisciplineRule> DisciplineRules { get; set; }
+        public DbSet<Team> Teams { get; set; }
+        public DbSet<Player> Players { get; set; }
+        public DbSet<Venue> Venues { get; set; }
+        public DbSet<Competition> Competitions { get; set; }
+        public DbSet<GroupTeam> GroupTeams { get; set; } = null!;
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -35,6 +50,7 @@ namespace Siged.Infrastructure.Persistence
 
             // ✅ LLAMA AL GRAN SEMBRADOR
             modelBuilder.Seed();
+            modelBuilder.SeedTournaments();
         }
     }
 }
