@@ -28,6 +28,61 @@ namespace Siged.Api.Controllers.Core.Tournaments
             _hubContext = hubContext;
             _standingsService = standingsService;
         }
+
+        /// <summary>
+        /// Vitrina pública (/torneos): partidos en vivo o del día (UTC), sin conocer journalId.
+        /// Prioriza <see cref="MatchStatus.EnVivo"/>; incluye el resto del día en la misma lista (el front puede separar).
+        /// </summary>
+        [HttpGet("public/landing")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetPublicLandingMatches([FromQuery] string? date = null)
+        {
+            DateTime dayStart;
+            DateTime dayEnd;
+            if (!string.IsNullOrWhiteSpace(date) && DateTime.TryParse(date, out var parsed))
+            {
+                dayStart = DateTime.SpecifyKind(parsed.Date, DateTimeKind.Utc);
+                dayEnd = dayStart.AddDays(1);
+            }
+            else
+            {
+                dayStart = DateTime.UtcNow.Date;
+                dayEnd = dayStart.AddDays(1);
+            }
+
+            var matches = await _context.Matches
+                .AsNoTracking()
+                .Include(m => m.LocalTeam)
+                .Include(m => m.VisitorTeam)
+                .Include(m => m.Discipline)
+                .Include(m => m.Phase)
+                .Where(m => m.IsActive && (
+                    m.Status == MatchStatus.EnVivo
+                    || (m.ScheduledAt >= dayStart && m.ScheduledAt < dayEnd)))
+                .OrderByDescending(m => m.Status == MatchStatus.EnVivo)
+                .ThenBy(m => m.ScheduledAt)
+                .Take(48)
+                .Select(m => new
+                {
+                    m.Id,
+                    CompetitionId = m.Phase.CompetitionId,
+                    Status = m.Status,
+                    m.ScheduledAt,
+                    m.LocalScore,
+                    m.VisitorScore,
+                    DisciplineName = m.Discipline.Name,
+                    LocalTeam = m.LocalTeam != null
+                        ? new { m.LocalTeam.Name, m.LocalTeam.LogoUrl }
+                        : null,
+                    VisitorTeam = m.VisitorTeam != null
+                        ? new { m.VisitorTeam.Name, m.VisitorTeam.LogoUrl }
+                        : null
+                })
+                .ToListAsync();
+
+            return Ok(matches);
+        }
+
         // 1. Ver partidos de una fecha específica (Lo que verá la "Mesa")
         [HttpGet("journal/{journalId}")]
         public async Task<IActionResult> GetByJournal(Guid journalId)
