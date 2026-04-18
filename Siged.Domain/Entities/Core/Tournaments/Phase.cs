@@ -14,6 +14,7 @@ namespace Siged.Domain.Entities.Core.Tournaments
         public string Name { get; set; } = string.Empty; // Ej: "Fase de Grupos"
 
         public PhaseType Type { get; set; }
+        public bool IsDoubleLeg { get; set; } = false; // true = Ida y Vuelta
         public bool IsDirectElimination { get; set; }
         public int Order { get; set; }
 

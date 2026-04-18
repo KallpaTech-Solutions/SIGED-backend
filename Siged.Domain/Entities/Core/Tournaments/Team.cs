@@ -11,6 +11,9 @@ namespace Siged.Domain.Entities.Core.Tournaments
         [Required, MaxLength(100)]
         public string Name { get; set; } = string.Empty;
 
+        // --- 🔗 CONEXIÓN CON TU SISTEMA DE ORGANIZACIÓN ---
+        public int OrganizacionId { get; set; } // El ID de la Escuela (Hija)
+        public virtual Organizacion Organizacion { get; set; } = null!;
         public string? LogoUrl { get; set; }
 
         [MaxLength(5)]
@@ -22,6 +25,7 @@ namespace Siged.Domain.Entities.Core.Tournaments
 
         // Relación con Jugadores (Ya la tenías)
         public virtual ICollection<Player> Players { get; set; } = new List<Player>();
+        public virtual ICollection<CompetitionTeam> CompetitionTeams { get; set; } = new List<CompetitionTeam>();
 
         // Relación con Grupos (Para la Fase 3)
         // Esta es la "matrícula" del equipo en los torneos

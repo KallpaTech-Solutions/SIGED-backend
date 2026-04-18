@@ -10,11 +10,12 @@ namespace Siged.Domain.Entities.Core.Tournaments.Enums
     {
         Puntaje = 1,      // Goles, Canastas, Puntos de set
         Goal = 2,
-        TarjetaAmarilla = 3,
-        TarjetaRoja = 4,
-        Sustitucion = 5,
-        Falta = 6,
-        InicioPeriodo = 7, // Para marcar cuando empieza el 2T o el Set 3
-        FinPeriodo = 8
+        PenaltyGoal = 3,
+        TarjetaAmarilla = 4,
+        TarjetaRoja = 5,
+        Sustitucion = 6,
+        Falta = 7,
+        InicioPeriodo = 8, // Para marcar cuando empieza el 2T o el Set 3
+        FinPeriodo = 9
     }
 }

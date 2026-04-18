@@ -41,6 +41,8 @@ namespace Siged.Infrastructure.Persistence
         public DbSet<Venue> Venues { get; set; }
         public DbSet<Competition> Competitions { get; set; }
         public DbSet<GroupTeam> GroupTeams { get; set; } = null!;
+        public DbSet<CompetitionRule> CompetitionRules { get; set; }
+        public DbSet<CompetitionTeam> CompetitionTeams { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);

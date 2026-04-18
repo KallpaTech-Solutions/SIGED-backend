@@ -16,6 +16,7 @@ namespace Siged.Domain.Entities.Core.Tournaments
         // Relación con el Deporte (ej: Fútbol)
         public Guid DisciplineId { get; set; }
         public virtual Discipline Discipline { get; set; } = null!;
+        public virtual ICollection<CompetitionTeam> CompetitionTeams { get; set; } = new List<CompetitionTeam>();
 
         public Gender Gender { get; set; }
         public string? CategoryName { get; set; } // Ej: "Libre", "Inter-Escuelas"

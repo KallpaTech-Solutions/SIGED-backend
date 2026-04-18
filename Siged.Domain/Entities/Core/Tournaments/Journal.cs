@@ -20,5 +20,6 @@ namespace Siged.Domain.Entities.Core.Tournaments
         public virtual Phase Phase { get; set; } = null!;
 
         public DateTime ScheduledDate { get; set; }
+        public virtual ICollection<Match> Matches { get; set; } = new List<Match>();
     }
 }

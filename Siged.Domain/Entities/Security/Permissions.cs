@@ -52,6 +52,13 @@ namespace Siged.Domain.Entities.Security
             new(NewsCreate, "Crear borradores de noticias", "NOTICIAS", new[] { SuperAdminId, AdminId, EncargadoId }),
             new(NewsManage, "Publicar, editar y archivar noticias", "NOTICIAS", new[] { SuperAdminId, AdminId }),
             new(NewsHighlight, "Marcar noticias como destacadas", "NOTICIAS", new[] { SuperAdminId, AdminId }),
+            // CATEGORÍA: TORNEOS
+            new(TournView, "Ver torneos, tablas y cronogramas", "TORNEOS", new[] { SuperAdminId, AdminId, EncargadoId, EstudianteId }),
+            new(TournManage, "Crear y editar torneos y disciplinas", "TORNEOS", new[] { SuperAdminId, AdminId }),
+            new(TournConfig, "Gestionar fases y sorteo de grupos", "TORNEOS", new[] { SuperAdminId, AdminId, EncargadoId }),
+            new(TournTeamManage, "Administrar equipos y enrolamiento de jugadores", "TORNEOS", new[] { SuperAdminId, EncargadoId }),
+            new(TournFixture, "Generar fixture y programar encuentros", "TORNEOS", new[] { SuperAdminId, EncargadoId }),
+            new(TournMatchControl, "Control de mesa: registro de eventos y actas", "TORNEOS", new[] { SuperAdminId, EncargadoId }),
          };
 
         // --- 4. CONSTANTES DE STRINGS (Para usar en [Authorize(Policy = ...)]) ---
@@ -67,7 +74,13 @@ namespace Siged.Domain.Entities.Security
 
         public const string CompTournView = "comp.tourn.view";
         public const string CompTournManage = "comp.tourn.manage";
-
+        //Tournamentes, disciplinas, competencias, resultados
+        public const string TournView = "tourn.view";                // Ver torneos, tablas y resultados (Público/Estudiante)
+        public const string TournManage = "tourn.manage";            // Crear torneos y disciplinas (Admin OTI)
+        public const string TournConfig = "tourn.config";            // Configurar Fases y Grupos (Encargado/Admin)
+        public const string TournTeamManage = "tourn.team.manage";    // Inscribir Equipos y Jugadores (Encargado)
+        public const string TournFixture = "tourn.fixture";          // Programar fechas, horas y sedes (Encargado/Mesa)
+        public const string TournMatchControl = "tourn.match.control"; // Registrar goles, tarjetas y finalizar (Mesa)
         // CATEGORÍA: NOTICIAS
         public const string NewsView = "news.view";          // Ver el panel de gestión
         public const string NewsCreate = "news.create";      // Crear borradores

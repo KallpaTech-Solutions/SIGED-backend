@@ -1,22 +1,35 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Siged.Domain.Entities.Security;
 using Siged.Infrastructure.Services.Tournment;
 
-// For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
-
-namespace Siged.Api.Controllers.Core.Tournaments
+[Route("api/[controller]")]
+[ApiController]
+[Authorize]
+public class StandingsController : ControllerBase
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class StandingsController : ControllerBase
-    {
-        private readonly StandingsService _standingsService;
-        public StandingsController(StandingsService standingsService) => _standingsService = standingsService;
+    private readonly StandingsService _standingsService;
+    public StandingsController(StandingsService standingsService) => _standingsService = standingsService;
 
-        [HttpGet("group/{groupId}")]
-        public async Task<IActionResult> GetStandings(Guid groupId)
-        {
-            var result = await _standingsService.GetStandingsByGroupAsync(groupId);
-            return Ok(result);
-        }
+    /// <summary>
+    /// Obtiene la tabla de posiciones de un grupo.
+    /// </summary>
+    [HttpGet("group/{groupId}")]
+    [AllowAnonymous] // 👈 El público debe poder ver la tabla sin loguearse
+    public async Task<IActionResult> GetStandings(Guid groupId)
+    {
+        var result = await _standingsService.GetStandingsByGroupAsync(groupId);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// RECALCULO FORZADO: Útil si hubo ediciones manuales en los resultados.
+    /// </summary>
+    [HttpPost("group/{groupId}/recalculate")]
+    [Authorize(Policy = Permissions.TournManage)] // 👈 Solo el administrador
+    public async Task<IActionResult> Recalculate(Guid groupId)
+    {
+        await _standingsService.UpdateGroupStandingsAsync(groupId);
+        return Ok(new { message = "Tabla de posiciones recalculada y persistida." });
     }
 }

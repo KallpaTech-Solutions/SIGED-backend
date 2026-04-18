@@ -34,9 +34,17 @@ namespace Siged.Api.Controllers.Core.Tournaments
         public async Task<IActionResult> GetByCompetition(Guid competitionId)
         {
             var phases = await _context.Phases
-                .Include(p => p.Groups) // Traer los grupos de la fase
                 .Where(p => p.CompetitionId == competitionId)
                 .OrderBy(p => p.Order)
+                .Select(p => new {
+                    p.Id,
+                    p.Name,
+                    p.Type,
+                    p.Order,
+                    GroupsCount = p.Groups.Count,
+                    // Si es Knockout, nos interesará saber cuántos equipos hay
+                    TotalTeams = p.Groups.Sum(g => g.GroupTeams.Count)
+                })
                 .ToListAsync();
 
             return Ok(phases);

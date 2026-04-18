@@ -1,15 +1,18 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Siged.Application.DTOs.Tournaments.Player;
 using Siged.Application.DTOs.Tournaments.Team;
 using Siged.Application.Interfaces.Almacenamiento;
 using Siged.Domain.Entities.Core.Tournaments;
+using Siged.Domain.Entities.Security;
 using Siged.Infrastructure.Persistence;
 
 namespace Siged.Api.Controllers.Core.Tournaments
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize] // Bloqueado por defecto para seguridad SIGED
     public class TeamsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
@@ -21,15 +24,39 @@ namespace Siged.Api.Controllers.Core.Tournaments
             _storageService = storageService;
         }
 
-        // --- LECTURA ---
-
+        /// <summary>
+        /// Retrieves all teams, optionally filtering by active status.
+        /// </summary>
+        /// <param name="onlyActive">true to include only active teams; false to include all teams.</param>
+        /// <returns>An IActionResult containing a list of TeamDto objects.</returns>
+        /// <response code="200">Returns the list of teams.</response>
+        /// <response code="401">Unauthorized access.</response>
+        /// <response code="500">Internal server error.</response>
+        /// <response code="400">Bad request.</response>
+        /// <response code="404">Not found.</response>
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] bool onlyActive = true)
         {
-            var query = _context.Teams.AsQueryable();
+            var query = _context.Teams
+                .Include(t => t.Organizacion)
+                .AsQueryable();
+
             if (onlyActive) query = query.Where(t => t.IsActive);
 
-            return Ok(await query.OrderBy(t => t.Name).ToListAsync());
+            var teams = await query.OrderBy(t => t.Name).Select(t => new TeamDto
+            {
+                Id = t.Id,
+                Name = t.Name,
+                Initials = t.Initials,
+                LogoUrl = t.LogoUrl,
+                RepresentativeName = t.RepresentativeName,
+                IsActive = t.IsActive,
+                // ✅ Ahora el compilador encontrará estas propiedades:
+                NombreEscuela = t.Organizacion.Nombre,
+                ColorEscuela = t.Organizacion.ColorRepresentativo
+            }).ToListAsync();
+
+            return Ok(teams);
         }
 
         [HttpGet("{id}")]
@@ -71,19 +98,24 @@ namespace Siged.Api.Controllers.Core.Tournaments
         // --- CREACIÓN ---
 
         [HttpPost]
+        [Authorize(Policy = Permissions.TournManage)]
         public async Task<IActionResult> Create([FromForm] CreateTeamDto dto)
         {
-            // 1. Subir logo/escudo al bucket "equipos"
-            string? logoUrl = null;
-            if (dto.LogoFile != null)
-            {
-                logoUrl = await _storageService.UploadFileAsync(dto.LogoFile, "equipos");
-            }
+            // 🛡️ Validación de Ingeniería: ¿La escuela existe y es válida?
+            var org = await _context.Organizaciones.FindAsync(dto.OrganizacionId);
+            if (org == null) return BadRequest("La organización no existe.");
 
-            // 2. Crear entidad
+            if (org.Tipo != "Escuela")
+                return BadRequest("Solo se pueden crear equipos vinculados a una 'Escuela'.");
+
+            string? logoUrl = dto.LogoFile != null
+                ? await _storageService.UploadFileAsync(dto.LogoFile, "equipos")
+                : null;
+
             var team = new Team
             {
                 Name = dto.Name,
+                OrganizacionId = dto.OrganizacionId, // 🔗 El vínculo vital
                 Initials = dto.Initials?.ToUpper(),
                 RepresentativeName = dto.RepresentativeName,
                 LogoUrl = logoUrl,

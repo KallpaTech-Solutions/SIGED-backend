@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http.Features;
+﻿using System;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Siged.Api.Extensions;
@@ -9,16 +10,26 @@ using Siged.Infrastructure.Persistence;
 using Siged.Infrastructure.Services.Almacenamiento;
 using Siged.Infrastructure.Services.Tournment;
 
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 var builder = WebApplication.CreateBuilder(args);
 
 // --- 1. CONFIGURACIÓN DE SERVICIOS ---
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+        options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 builder.Services.AddHttpClient<IMediaStorageService, SupabaseMediaStorageService>();
 builder.Services.AddScoped<FixtureService>();
+builder.Services.AddScoped<PlayoffService>();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<StandingsService>();
+builder.Services.AddScoped<TournamentManagerService>();
+builder.Services.AddScoped<DisciplineRuleService>();
+builder.Services.AddScoped<BracketService>();
 
 // Extensiones de arquitectura y seguridad
 builder.Services.AddInfrastructure(builder.Configuration);

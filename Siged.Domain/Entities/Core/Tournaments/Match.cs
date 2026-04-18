@@ -18,10 +18,10 @@ namespace Siged.Domain.Entities.Core.Tournaments
         public virtual Venue? Venue { get; set; }
 
         // Equipos (Usaremos tus nombres: Local y Visitor)
-        public Guid LocalTeamId { get; set; }
-        public virtual Team LocalTeam { get; set; } = null!;
-        public Guid VisitorTeamId { get; set; }
-        public virtual Team VisitorTeam { get; set; } = null!;
+        public Guid? LocalTeamId { get; set; }
+        public virtual Team? LocalTeam { get; set; } = null!;
+        public Guid? VisitorTeamId { get; set; }
+        public virtual Team? VisitorTeam { get; set; } = null!;
 
         public Guid PhaseId { get; set; }
         public virtual Phase Phase { get; set; } = null!;
@@ -36,7 +36,11 @@ namespace Siged.Domain.Entities.Core.Tournaments
         public int LocalScore { get; set; }
         public int VisitorScore { get; set; }
         public bool IsActive { get; set; } = true;
-
+        public int? LocalPenaltyScore { get; set; }  // Goles en tanda de penales
+        public int? VisitorPenaltyScore { get; set; }
+        public string? Note { get; set; } // Para anotaciones especiales (ej. "Pasa libre", "W.O.", etc.)
+        public Guid? WinnerId { get; set; } // El ID del equipo que avanza (crucial para llaves)
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public virtual ICollection<MatchEvent> Events { get; set; } = new List<MatchEvent>();
     }
 }

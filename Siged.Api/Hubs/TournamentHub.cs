@@ -8,7 +8,8 @@ namespace Siged.Api.Hubs
         // Así, los que ven el Partido A no reciben notificaciones del Partido B.
         public async Task JoinMatchRoom(string matchId)
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, matchId);
+            // Forzamos ToLower() para que el nombre del grupo sea siempre consistente
+            await Groups.AddToGroupAsync(Context.ConnectionId, matchId.ToLower());
         }
     }
 }

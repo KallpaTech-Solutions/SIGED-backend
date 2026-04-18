@@ -1,15 +1,18 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Siged.Application.DTOs.Tournaments.Player;
 using Siged.Application.Interfaces.Almacenamiento;
 using Siged.Domain.Entities.Core.Tournaments;
 using Siged.Domain.Entities.Core.Tournaments.Enums;
+using Siged.Domain.Entities.Security;
 using Siged.Infrastructure.Persistence;
 
 namespace Siged.Api.Controllers.Core.Tournaments
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class PlayersController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
@@ -23,8 +26,13 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
         // --- CREACIÓN ---
         [HttpPost]
+        [Authorize(Policy = Permissions.TournManage)]
         public async Task<IActionResult> Create([FromForm] CreatePlayerDto dto)
         {
+            // 1. Validar que el equipo exista
+            if (!await _context.Teams.AnyAsync(t => t.Id == dto.TeamId))
+                return BadRequest("El equipo especificado no existe.");
+
             if (await _context.Players.AnyAsync(p => p.Dni == dto.Dni))
                 return BadRequest("El DNI ya se encuentra registrado.");
 

@@ -1,5 +1,6 @@
-﻿
-namespace Siged.Application.DTOs.Tournaments
+﻿using Siged.Domain.Entities.Core.Tournaments.Enums;
+
+namespace Siged.Application.DTOs.Tournaments.Discipline
 {
     public class DisciplineDto
     {
@@ -8,5 +9,6 @@ namespace Siged.Application.DTOs.Tournaments
         public string? IconUrl { get; set; }
         public string? Description { get; set; }
         public bool IsActive { get; set; }
+        public ScoringType ScoringType { get; set; } 
     }
 }

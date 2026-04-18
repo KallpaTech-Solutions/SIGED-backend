@@ -1,4 +1,5 @@
-﻿using Siged.Domain.Entities.Security;
+﻿using Siged.Domain.Entities.Core.Tournaments;
+using Siged.Domain.Entities.Security;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
@@ -12,6 +13,12 @@ namespace Siged.Domain.Entities.Core
         public required string Nombre { get; set; } // Ej: "Facultad de Ingeniería en Informática y Sistemas"
         public required string Abreviatura { get; set; } // Ej: "FIIS" (Vital para tablas de posiciones)
         public string Tipo { get; set; } = "Facultad"; // Ej: "Universidad", "Facultad", "Escuela"
+
+        // --- 💡 EL TOQUE PARA LA JERARQUÍA ---
+        public int? OrganizacionPadreId { get; set; } // Si es null, es una Facultad. Si tiene valor, es una Escuela.
+        [ForeignKey("OrganizacionPadreId")]
+        public virtual Organizacion? OrganizacionPadre { get; set; }
+        public virtual ICollection<Organizacion> SubOrganizaciones { get; set; } = new List<Organizacion>();
 
         // --- IDENTIDAD VISUAL E HISTORIA ---
         [MaxLength(2000)]
@@ -34,5 +41,8 @@ namespace Siged.Domain.Entities.Core
         // --- RELACIONES (Entity Framework) ---
         // Una organización (Facultad) tiene muchos Usuarios (Estudiantes, Encargados)
         public ICollection<Usuario> Usuarios { get; set; } = new List<Usuario>();
+
+        // Relación con los Equipos
+        public virtual ICollection<Team> Equipos { get; set; } = new List<Team>();
     }
 }

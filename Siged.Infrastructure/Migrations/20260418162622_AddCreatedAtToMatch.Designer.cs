@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Siged.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Siged.Infrastructure.Persistence;
 namespace Siged.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260418162622_AddCreatedAtToMatch")]
+    partial class AddCreatedAtToMatch
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -344,7 +347,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Excerpt")
                         .IsRequired()
@@ -377,7 +380,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("character varying(120)");
 
                     b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("ViewCount")
                         .HasColumnType("integer");
@@ -439,7 +442,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<DateTime?>("FechaCreacion")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Lema")
                         .HasMaxLength(250)
@@ -633,7 +636,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<DateTime>("FechaInscripcion")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("PartidosJugados")
                         .HasColumnType("integer");
@@ -737,35 +740,35 @@ namespace Siged.Infrastructure.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("1c08265a-b57a-4bea-8fe5-cacf6eb5893a"),
+                            Id = new Guid("e305600e-7c00-44f3-8cb2-52e7970b2920"),
                             DisciplineId = new Guid("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c"),
                             RuleKey = "TIENE_TARJETAS",
                             RuleValue = "True"
                         },
                         new
                         {
-                            Id = new Guid("d6c7b759-104d-419f-8560-eed7ca441d16"),
+                            Id = new Guid("0f5bb5ce-011a-4ec7-a02a-9a3353709443"),
                             DisciplineId = new Guid("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c"),
                             RuleKey = "PUNTOS_POR_VICTORIA",
                             RuleValue = "3"
                         },
                         new
                         {
-                            Id = new Guid("ae714f95-c382-4da6-aa1f-a8585433b22d"),
+                            Id = new Guid("00be158b-0563-49d4-a440-a0de7ea1c8e5"),
                             DisciplineId = new Guid("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e"),
                             RuleKey = "USA_SETS",
                             RuleValue = "True"
                         },
                         new
                         {
-                            Id = new Guid("596d4a0e-a556-4613-9274-72080cab0a53"),
+                            Id = new Guid("273b94a9-a3b9-4a54-a7a0-492bd4143326"),
                             DisciplineId = new Guid("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e"),
                             RuleKey = "PUNTOS_POR_VICTORIA",
                             RuleValue = "2"
                         },
                         new
                         {
-                            Id = new Guid("0550981f-9625-405d-be5e-891d7ae6dc71"),
+                            Id = new Guid("c3d5ebfe-1476-4322-9026-a08e2ecffbeb"),
                             DisciplineId = new Guid("c1d2e3f4-a5b6-4c8d-9e0f-1a2b3c4d5e6f"),
                             RuleKey = "CANTIDAD_PERIODOS",
                             RuleValue = "4"
@@ -860,7 +863,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("ScheduledDate")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Sequence")
                         .HasColumnType("integer");
@@ -881,7 +884,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("DisciplineId")
                         .HasColumnType("uuid");
@@ -911,7 +914,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("ScheduledAt")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -1028,10 +1031,10 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTime?>("BirthDate")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Dni")
                         .IsRequired()
@@ -1109,13 +1112,13 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Description")
                         .HasColumnType("text");
 
                     b.Property<DateTime>("EndDate")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
@@ -1134,7 +1137,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<DateTime>("StartDate")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -1171,14 +1174,14 @@ namespace Siged.Infrastructure.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("95d0b0ab-5478-4659-b959-4cb23835e898"),
+                            Id = new Guid("7c6e7706-38d5-4931-a7b5-9f3f6d061f41"),
                             Address = "Campus Principal",
                             Capacity = 5000,
                             Name = "Estadio Universitario UNAS"
                         },
                         new
                         {
-                            Id = new Guid("dd3cb1e3-45fd-405f-9429-312df500dd10"),
+                            Id = new Guid("4c8cab32-4239-4396-b759-649c7ff33af0"),
                             Address = "Pabellón de Sistemas",
                             Capacity = 200,
                             Name = "Losa Deportiva FIIS"
@@ -1201,7 +1204,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<DateTime>("Fecha")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("IpAddress")
                         .HasColumnType("text");
@@ -1403,7 +1406,7 @@ namespace Siged.Infrastructure.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<DateTime>("FechaExpiracion")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Token")
                         .IsRequired()
@@ -1427,7 +1430,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasDefaultValue("light");
 
                     b.Property<DateTime>("UltimaActualizacion")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("WidgetsVisibles")
                         .IsRequired()
@@ -1456,7 +1459,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<DateTime>("FechaRegistro")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int?>("OrganizacionId")
                         .HasColumnType("integer");
@@ -1614,7 +1617,7 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<DateTime>("FechaRegistro")
-                        .HasColumnType("timestamp without time zone");
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasDiscriminator().HasValue("Estudiante");
 
@@ -1627,7 +1630,7 @@ namespace Siged.Infrastructure.Migrations
                             Nombres = "Pedro",
                             CodigoEstudiante = "0020210456",
                             EstaMatriculado = true,
-                            FechaRegistro = new DateTime(2026, 4, 18, 17, 48, 43, 720, DateTimeKind.Utc).AddTicks(4931)
+                            FechaRegistro = new DateTime(2026, 4, 18, 16, 26, 21, 715, DateTimeKind.Utc).AddTicks(9131)
                         });
                 });
 
@@ -1714,7 +1717,7 @@ namespace Siged.Infrastructure.Migrations
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.CompetitionTeam", b =>
                 {
                     b.HasOne("Siged.Domain.Entities.Core.Tournaments.Competition", "Competition")
-                        .WithMany("CompetitionTeams")
+                        .WithMany()
                         .HasForeignKey("CompetitionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -1962,8 +1965,6 @@ namespace Siged.Infrastructure.Migrations
 
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.Competition", b =>
                 {
-                    b.Navigation("CompetitionTeams");
-
                     b.Navigation("Phases");
                 });
 
