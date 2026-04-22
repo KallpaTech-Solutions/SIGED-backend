@@ -81,6 +81,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
             {
                 Name = dto.Name,
                 IconUrl = iconUrl,
+                TemplateKey = dto.TemplateKey,
                 IsActive = true,
                 ScoringType = template.Type // ⬅️ IMPORTANTE: Asignamos el tipo de la plantilla
             };
@@ -106,7 +107,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         /// <response code="500">Ocurrió un error interno al actualizar la disciplina.</response>
         [HttpPut("{id}")]
         [Authorize(Policy = Permissions.TournManage)]
-        public async Task<IActionResult> Update(Guid id, [FromForm] CreateDisciplineDto dto)
+        public async Task<IActionResult> Update(Guid id, [FromForm] UpdateDisciplineDto dto)
         {
             var discipline = await _context.Disciplines.FindAsync(id);
             if (discipline == null) return NotFound();
@@ -117,7 +118,6 @@ namespace Siged.Api.Controllers.Core.Tournaments
             }
 
             discipline.Name = dto.Name;
-            // Aquí podrías agregar más campos si los necesitas en el futuro
 
             await _context.SaveChangesAsync();
             return Ok(discipline);
@@ -147,7 +147,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         /// Eliminación definitiva (Solo si no tiene competencias asociadas).
         /// </summary>
         [HttpDelete("{id}")]
-        [Authorize(Policy = Permissions.SecurityRoleManage)]
+        [Authorize(Policy = Permissions.TournManage)]
         public async Task<IActionResult> Delete(Guid id)
         {
             var discipline = await _context.Disciplines.FindAsync(id);

@@ -20,8 +20,8 @@ namespace Siged.Application.DTOs.Tournaments.Match
 
         // --- Campos para multideporte ---
 
-        [Range(1, 100)]
-        public int Value { get; set; } = 1; // 1 para fútbol, 2 o 3 para básquet
+        [Range(0, 100)]
+        public int Value { get; set; } = 0; // 0 ej. tiro libre sin conversión; 1 gol; 2–3 básquet
 
         [Required]
         public int Period { get; set; } // 1 para 1T, 2 para 2T, etc.

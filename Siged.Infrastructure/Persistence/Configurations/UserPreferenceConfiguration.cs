@@ -16,7 +16,7 @@ namespace Siged.Infrastructure.Persistence.Configurations
             builder.Property(x => x.WidgetsVisibles)
                 .IsRequired()
                 .HasMaxLength(500)
-                .HasDefaultValue("usuarios,orgs,activos,recent");
+                .HasDefaultValue("usuarios,orgs,torneos,activos,recent,banner_torneos");
 
             builder.Property(x => x.Tema)
                 .HasMaxLength(20)

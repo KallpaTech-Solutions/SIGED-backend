@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Siged.Api.Services;
 using Siged.Application.DTOs.Tournaments.Playoff;
 using Siged.Domain.Entities.Security;
 using Siged.Infrastructure.Persistence;
@@ -19,13 +20,20 @@ namespace Siged.Api.Controllers.Core.Tournaments
         private readonly ApplicationDbContext _context;
         private readonly PlayoffService _playoffService;
         private readonly BracketService _bracketService;
+        private readonly TournamentVitrinaBroadcastService _vitrina;
 
-        public FixturesController(FixtureService fixtureService, ApplicationDbContext context, PlayoffService playoffService, BracketService bracketService)
+        public FixturesController(
+            FixtureService fixtureService,
+            ApplicationDbContext context,
+            PlayoffService playoffService,
+            BracketService bracketService,
+            TournamentVitrinaBroadcastService vitrina)
         {
             _fixtureService = fixtureService;
             _context = context;
             _playoffService = playoffService;
             _bracketService = bracketService;
+            _vitrina = vitrina;
         }
 
         /// <summary>
@@ -54,6 +62,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
             // 3. Ejecutar algoritmo Berger
             await _fixtureService.GenerateRoundRobin(groupId);
 
+            await _vitrina.NotifyLandingRefreshAsync();
             return Ok(new { message = "Fixture generado exitosamente con Algoritmo Berger." });
         }
 
@@ -69,6 +78,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
             try
             {
                 await _playoffService.GenerateKnockoutFromGroups(dto);
+                await _vitrina.NotifyLandingRefreshAsync();
                 return Ok(new { message = $"Llaves de {dto.NewPhaseName} generadas exitosamente." });
             }
             catch (Exception ex)
@@ -86,6 +96,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         public async Task<IActionResult> Promote([FromBody] PromoteWinnersDto dto)
         {
             await _playoffService.PromoteWinnersToNextPhase(dto);
+            await _vitrina.NotifyLandingRefreshAsync();
             return Ok(new { message = $"Se han generado los cruces para {dto.NextPhaseName}." });
         }
 
@@ -105,6 +116,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 // Llamamos al método (asegúrate de que el nombre coincida)
                 var phaseId = await _playoffService.GenerateDirectKnockout(dto);
 
+                await _vitrina.NotifyLandingRefreshAsync();
                 return Ok(new
                 {
                     message = $"Llaves de {dto.PhaseName} generadas exitosamente.",

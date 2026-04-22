@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Siged.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Siged.Infrastructure.Persistence;
 namespace Siged.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260421162318_AddDisciplineTemplateKey")]
+    partial class AddDisciplineTemplateKey
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -740,35 +743,35 @@ namespace Siged.Infrastructure.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("093e3405-0ecf-44c3-81b5-08cf92e07b19"),
+                            Id = new Guid("cc841c18-c8a8-4142-b534-5b7b5328532f"),
                             DisciplineId = new Guid("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c"),
                             RuleKey = "TIENE_TARJETAS",
                             RuleValue = "True"
                         },
                         new
                         {
-                            Id = new Guid("cca57dfd-e7dd-4758-bce0-baad706c0ef9"),
+                            Id = new Guid("a6dcd716-e539-4884-aaa2-67d9171a7566"),
                             DisciplineId = new Guid("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c"),
                             RuleKey = "PUNTOS_POR_VICTORIA",
                             RuleValue = "3"
                         },
                         new
                         {
-                            Id = new Guid("7acbadae-da59-4444-bf98-98637647d997"),
+                            Id = new Guid("59ee95bb-2b15-46c5-b14b-868336c09416"),
                             DisciplineId = new Guid("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e"),
                             RuleKey = "USA_SETS",
                             RuleValue = "True"
                         },
                         new
                         {
-                            Id = new Guid("50815a35-831a-49e3-a022-2c0588c8962a"),
+                            Id = new Guid("94208c9e-cab6-46d7-9619-98d791386481"),
                             DisciplineId = new Guid("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e"),
                             RuleKey = "PUNTOS_POR_VICTORIA",
                             RuleValue = "2"
                         },
                         new
                         {
-                            Id = new Guid("2a8bf7f5-c7aa-4179-81fa-fcb98096ea60"),
+                            Id = new Guid("b5116331-93fa-4b34-ba1d-d12d8a7da05f"),
                             DisciplineId = new Guid("c1d2e3f4-a5b6-4c8d-9e0f-1a2b3c4d5e6f"),
                             RuleKey = "CANTIDAD_PERIODOS",
                             RuleValue = "4"
@@ -966,9 +969,6 @@ namespace Siged.Infrastructure.Migrations
 
                     b.Property<string>("Note")
                         .HasColumnType("text");
-
-                    b.Property<DateTime?>("OccurredAt")
-                        .HasColumnType("timestamp without time zone");
 
                     b.Property<int>("Period")
                         .HasColumnType("integer");
@@ -1182,14 +1182,14 @@ namespace Siged.Infrastructure.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("9496a2db-db5f-4dbd-941f-be612b01142c"),
+                            Id = new Guid("dba27f94-9524-486a-aae7-473166a835d6"),
                             Address = "Campus Principal",
                             Capacity = 5000,
                             Name = "Estadio Universitario UNAS"
                         },
                         new
                         {
-                            Id = new Guid("cb826a37-c433-44aa-b316-36a185f33b81"),
+                            Id = new Guid("28f1993d-c533-4dd1-8c80-4f4c9c3a96de"),
                             Address = "Pabellón de Sistemas",
                             Capacity = 200,
                             Name = "Losa Deportiva FIIS"
@@ -1492,7 +1492,7 @@ namespace Siged.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
-                        .HasDefaultValue("usuarios,orgs,torneos,activos,recent,banner_torneos");
+                        .HasDefaultValue("usuarios,orgs,activos,recent");
 
                     b.HasKey("UserId");
 
@@ -1685,7 +1685,7 @@ namespace Siged.Infrastructure.Migrations
                             Nombres = "Pedro",
                             CodigoEstudiante = "0020210456",
                             EstaMatriculado = true,
-                            FechaRegistro = new DateTime(2026, 4, 22, 0, 48, 28, 374, DateTimeKind.Utc).AddTicks(960)
+                            FechaRegistro = new DateTime(2026, 4, 21, 16, 23, 17, 447, DateTimeKind.Utc).AddTicks(9026)
                         });
                 });
 

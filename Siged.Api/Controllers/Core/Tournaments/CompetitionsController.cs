@@ -1,12 +1,17 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Siged.Application.DTOs.Tournaments;
-using Siged.Application.DTOs.Tournaments.Discipline; 
+using Siged.Application.DTOs.Tournaments.Bracket;
+using Siged.Application.DTOs.Tournaments.Discipline;
+using Siged.Application.DTOs.Tournaments.Standing;
 using Siged.Domain.Entities.Core.Tournaments;
+using Siged.Domain.Entities.Core.Tournaments.Enums;
 using Siged.Infrastructure.Persistence;
 using Siged.Infrastructure.Services.Tournment;
 using Microsoft.AspNetCore.Authorization;
+using Siged.Api.Authorization;
 using Siged.Domain.Entities.Security;
+using Siged.Api.Services;
 
 
 namespace Siged.Api.Controllers.Core.Tournaments
@@ -19,11 +24,25 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
         private readonly ApplicationDbContext _context;
         private readonly TournamentManagerService _tournamentService;
+        private readonly StandingsService _standingsService;
+        private readonly BracketService _bracketService;
+        private readonly CompetitionFormatSetupService _formatSetupService;
+        private readonly TournamentVitrinaBroadcastService _vitrina;
 
-        public CompetitionsController(ApplicationDbContext context, TournamentManagerService tournamentService)
+        public CompetitionsController(
+            ApplicationDbContext context,
+            TournamentManagerService tournamentService,
+            StandingsService standingsService,
+            BracketService bracketService,
+            CompetitionFormatSetupService formatSetupService,
+            TournamentVitrinaBroadcastService vitrina)
         {
             _context = context;
             _tournamentService = tournamentService;
+            _standingsService = standingsService;
+            _bracketService = bracketService;
+            _formatSetupService = formatSetupService;
+            _vitrina = vitrina;
         }
 
         /// <summary>
@@ -66,6 +85,30 @@ namespace Siged.Api.Controllers.Core.Tournaments
         }
 
         /// <summary>
+        /// Armado automático del formato: grupos equilibrados (ej. 15 equipos, máx. 4 → 4+4+4+3) con tablas RR,
+        /// o eliminación directa. Solo si la competencia aún no tiene fases. Requiere equipos ya inscritos.
+        /// </summary>
+        [HttpPost("{id}/setup-format")]
+        [Authorize(Policy = TournFormatSetupAuth.PolicyName)]
+        public async Task<IActionResult> SetupFormat(Guid id, [FromBody] SetupCompetitionFormatDto dto)
+        {
+            try
+            {
+                var result = await _formatSetupService.SetupAsync(id, dto);
+                await _vitrina.NotifyLandingRefreshAsync();
+                return Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = "No se pudo configurar el formato.", detail = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Obtiene una competición por su ID, incluyendo su disciplina y torneo relacionados.
         /// </summary>
         /// <param name="id">ID de la competición.</param>
@@ -77,14 +120,213 @@ namespace Siged.Api.Controllers.Core.Tournaments
             var comp = await _context.Competitions
                 .Include(c => c.Tournament)
                 .Include(c => c.Discipline)
-                .Include(c => c.CompetitionTeams) // 👈 Cargamos la lista de inscripciones
-                    .ThenInclude(i => i.Team)   // 👈 Y de cada inscripción, cargamos el Team
+                .Include(c => c.CompetitionTeams)
+                    .ThenInclude(i => i.Team)
+                        .ThenInclude(tm => tm.Organizacion)
                 .FirstOrDefaultAsync(c => c.Id == id);
 
             if (comp == null) return NotFound();
             return Ok(comp);
         }
 
+        /// <summary>
+        /// Vitrina pública: fases (modalidad), tablas por grupo (round robin), llaves (eliminación) y partidos.
+        /// </summary>
+        [HttpGet("{id}/public-dashboard")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetPublicDashboard(Guid id)
+        {
+            var comp = await _context.Competitions
+                .AsNoTracking()
+                .Include(c => c.Phases)
+                .Include(c => c.Tournament)
+                .Include(c => c.Discipline)
+                .FirstOrDefaultAsync(c => c.Id == id);
+
+            if (comp == null) return NotFound();
+
+            var phases = comp.Phases.OrderBy(p => p.Order).ToList();
+            var phasesOut = new List<object>();
+
+            foreach (var phase in phases)
+            {
+                var phaseHasGroups = await _context.Groups.AnyAsync(g => g.PhaseId == phase.Id);
+                var useRoundRobinLayout = phase.Type == PhaseType.RoundRobin
+                    || (phase.Type == PhaseType.Suizo && phaseHasGroups);
+
+                if (useRoundRobinLayout)
+                {
+                    var groups = await _context.Groups
+                        .AsNoTracking()
+                        .Where(g => g.PhaseId == phase.Id)
+                        .OrderBy(g => g.Name)
+                        .ToListAsync();
+
+                    var groupsPayload = new List<object>();
+                    foreach (var g in groups)
+                    {
+                        List<TeamStandingDto> standings =
+                            await _standingsService.GetStandingsByGroupAsync(g.Id);
+
+                        var matches = await LoadMatchRowsForGroupAsync(g.Id);
+
+                        groupsPayload.Add(new
+                        {
+                            g.Id,
+                            g.Name,
+                            g.QualifiedCount,
+                            Standings = standings,
+                            Matches = matches
+                        });
+                    }
+
+                    phasesOut.Add(new
+                    {
+                        phase.Id,
+                        phase.Name,
+                        Type = phase.Type.ToString(),
+                        phase.Order,
+                        phase.IsDoubleLeg,
+                        phase.IsDirectElimination,
+                        Mode = "roundRobin",
+                        Groups = groupsPayload
+                    });
+                }
+                else
+                {
+                    BracketDto bracket = await _bracketService.GetBracketByPhaseAsync(phase.Id);
+
+                    var matches = await LoadMatchRowsForPhaseAsync(phase.Id);
+
+                    phasesOut.Add(new
+                    {
+                        phase.Id,
+                        phase.Name,
+                        Type = phase.Type.ToString(),
+                        phase.Order,
+                        phase.IsDoubleLeg,
+                        phase.IsDirectElimination,
+                        Mode = "knockout",
+                        Bracket = bracket,
+                        Matches = matches
+                    });
+                }
+            }
+
+            var statusCounts = await _context.Matches
+                .AsNoTracking()
+                .Where(m => m.Phase.CompetitionId == id && m.IsActive)
+                .GroupBy(m => m.Status)
+                .Select(g => new { Status = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            int count(MatchStatus s) => statusCounts.FirstOrDefault(x => x.Status == s)?.Count ?? 0;
+
+            return Ok(new
+            {
+                CompetitionId = comp.Id,
+                TournamentId = comp.TournamentId,
+                TournamentName = comp.Tournament.Name,
+                TournamentYear = comp.Tournament.Year,
+                DisciplineName = comp.Discipline.Name,
+                CategoryName = comp.CategoryName,
+                Gender = comp.Gender.ToString(),
+                Phases = phasesOut,
+                MatchSummary = new
+                {
+                    Total = count(MatchStatus.Programado) + count(MatchStatus.EnVivo) + count(MatchStatus.Finalizado) + count(MatchStatus.Suspendido),
+                    Programado = count(MatchStatus.Programado),
+                    EnVivo = count(MatchStatus.EnVivo),
+                    Finalizado = count(MatchStatus.Finalizado),
+                    Suspendido = count(MatchStatus.Suspendido)
+                }
+            });
+        }
+
+        /// <summary>
+        /// Proyección en SQL (join a Venue) para que <c>VenueName</c> no dependa del estado de navegaciones tras Include.
+        /// </summary>
+        private async Task<List<object>> LoadMatchRowsForGroupAsync(Guid groupId)
+        {
+            var rows = await _context.Matches
+                .AsNoTracking()
+                .Where(m => m.GroupId == groupId && m.IsActive)
+                .OrderBy(m => m.ScheduledAt)
+                .ThenBy(m => m.CreatedAt)
+                .Select(m => new
+                {
+                    m.Id,
+                    m.PhaseId,
+                    m.GroupId,
+                    m.Status,
+                    m.ScheduledAt,
+                    m.LocalScore,
+                    m.VisitorScore,
+                    VenueName = m.Venue != null ? m.Venue.Name : null,
+                    LN = m.LocalTeam != null ? m.LocalTeam.Name : null,
+                    VN = m.VisitorTeam != null ? m.VisitorTeam.Name : null,
+                    LLogo = m.LocalTeam != null ? m.LocalTeam.LogoUrl : null,
+                    VLogo = m.VisitorTeam != null ? m.VisitorTeam.LogoUrl : null,
+                })
+                .ToListAsync();
+
+            return rows.Select(r => (object)new
+            {
+                r.Id,
+                r.PhaseId,
+                r.GroupId,
+                Status = r.Status.ToString(),
+                r.ScheduledAt,
+                r.LocalScore,
+                r.VisitorScore,
+                r.VenueName,
+                LocalTeamName = r.LN ?? (r.Status == MatchStatus.Finalizado ? "—" : "Por definir"),
+                VisitorTeamName = r.VN ?? (r.Status == MatchStatus.Finalizado ? "—" : "Por definir"),
+                LocalTeamLogo = r.LLogo,
+                VisitorTeamLogo = r.VLogo,
+            }).ToList();
+        }
+
+        private async Task<List<object>> LoadMatchRowsForPhaseAsync(Guid phaseId)
+        {
+            var rows = await _context.Matches
+                .AsNoTracking()
+                .Where(m => m.PhaseId == phaseId && m.IsActive)
+                .OrderBy(m => m.ScheduledAt)
+                .ThenBy(m => m.CreatedAt)
+                .Select(m => new
+                {
+                    m.Id,
+                    m.PhaseId,
+                    m.GroupId,
+                    m.Status,
+                    m.ScheduledAt,
+                    m.LocalScore,
+                    m.VisitorScore,
+                    VenueName = m.Venue != null ? m.Venue.Name : null,
+                    LN = m.LocalTeam != null ? m.LocalTeam.Name : null,
+                    VN = m.VisitorTeam != null ? m.VisitorTeam.Name : null,
+                    LLogo = m.LocalTeam != null ? m.LocalTeam.LogoUrl : null,
+                    VLogo = m.VisitorTeam != null ? m.VisitorTeam.LogoUrl : null,
+                })
+                .ToListAsync();
+
+            return rows.Select(r => (object)new
+            {
+                r.Id,
+                r.PhaseId,
+                r.GroupId,
+                Status = r.Status.ToString(),
+                r.ScheduledAt,
+                r.LocalScore,
+                r.VisitorScore,
+                r.VenueName,
+                LocalTeamName = r.LN ?? (r.Status == MatchStatus.Finalizado ? "—" : "Por definir"),
+                VisitorTeamName = r.VN ?? (r.Status == MatchStatus.Finalizado ? "—" : "Por definir"),
+                LocalTeamLogo = r.LLogo,
+                VisitorTeamLogo = r.VLogo,
+            }).ToList();
+        }
 
         /// <summary>
         /// Obtiene todas las competiciones de un torneo específico, incluyendo su disciplina relacionada.

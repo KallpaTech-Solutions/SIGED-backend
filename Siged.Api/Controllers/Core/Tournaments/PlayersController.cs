@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Siged.Api.Authorization;
 using Siged.Application.DTOs.Tournaments.Player;
 using Siged.Application.Interfaces.Almacenamiento;
 using Siged.Domain.Entities.Core.Tournaments;
@@ -26,15 +27,22 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
         // --- CREACIÓN ---
         [HttpPost]
-        [Authorize(Policy = Permissions.TournManage)]
+        [Authorize(Policy = TournDelegateAuth.PolicyName)]
         public async Task<IActionResult> Create([FromForm] CreatePlayerDto dto)
         {
-            // 1. Validar que el equipo exista
-            if (!await _context.Teams.AnyAsync(t => t.Id == dto.TeamId))
+            var team = await _context.Teams.AsNoTracking().FirstOrDefaultAsync(t => t.Id == dto.TeamId);
+            if (team == null)
                 return BadRequest("El equipo especificado no existe.");
 
+            if (!TournDelegateAuth.IsTournamentAdmin(User))
+            {
+                var myOrg = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
+                if (myOrg == null || team.OrganizacionId != myOrg.Value)
+                    return Forbid();
+            }
+
             if (await _context.Players.AnyAsync(p => p.Dni == dto.Dni))
-                return BadRequest("El DNI ya se encuentra registrado.");
+                return BadRequest("Ese código de identificación ya está registrado.");
 
             string? photoUrl = dto.PhotoFile != null
                 ? await _storageService.UploadFileAsync(dto.PhotoFile, "jugadores")
@@ -61,10 +69,23 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
         // --- ACTUALIZACIÓN ---
         [HttpPut("{id}")]
+        [Authorize(Policy = TournDelegateAuth.PolicyName)]
         public async Task<IActionResult> Update(Guid id, [FromForm] CreatePlayerDto dto)
         {
-            var player = await _context.Players.FindAsync(id);
+            var player = await _context.Players
+                .Include(p => p.Team)
+                .FirstOrDefaultAsync(p => p.Id == id);
             if (player == null) return NotFound();
+
+            if (!TournDelegateAuth.IsTournamentAdmin(User))
+            {
+                var myOrg = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
+                if (myOrg == null || player.Team.OrganizacionId != myOrg.Value)
+                    return Forbid();
+            }
+
+            if (await _context.Players.AnyAsync(p => p.Dni == dto.Dni && p.Id != id))
+                return BadRequest("Ese código de identificación ya está registrado.");
 
             if (dto.PhotoFile != null)
                 player.PhotoUrl = await _storageService.UploadFileAsync(dto.PhotoFile, "jugadores");
@@ -89,22 +110,36 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 .ToListAsync());
         }
 
-        // --- ELIMINACIÓN ---
+        // --- ELIMINACIÓN / ESTADO ---
+        /// <summary>Activa o desactiva un jugador. Delegados solo sobre planteles de su escuela; administración de torneo sin esa restricción.</summary>
         [HttpPatch("{id}/status")]
+        [Authorize(Policy = TournDelegateAuth.PolicyName)]
         public async Task<IActionResult> ToggleStatus(Guid id)
         {
-            var player = await _context.Players.FindAsync(id);
+            var player = await _context.Players
+                .Include(p => p.Team)
+                .FirstOrDefaultAsync(p => p.Id == id);
             if (player == null) return NotFound();
+
+            if (!TournDelegateAuth.IsTournamentAdmin(User))
+            {
+                var myOrg = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
+                if (myOrg == null || player.Team.OrganizacionId != myOrg.Value)
+                    return Forbid();
+            }
 
             player.IsActive = !player.IsActive;
             await _context.SaveChangesAsync();
             return Ok(new { id, isActive = player.IsActive });
         }
 
+        /// <summary>Borrado físico solo para quienes administran torneos (no delegados de escuela).</summary>
         [HttpDelete("{id}")]
+        [Authorize(Policy = Permissions.TournManage)]
         public async Task<IActionResult> HardDelete(Guid id)
         {
             var player = await _context.Players
+                .Include(p => p.Team)
                 .Include(p => p.MatchEvents) // 🛡️ Protección
                 .FirstOrDefaultAsync(p => p.Id == id);
 

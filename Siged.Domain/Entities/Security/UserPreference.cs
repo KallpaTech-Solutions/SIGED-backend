@@ -10,7 +10,7 @@ namespace Siged.Domain.Entities.Security
 
         // Guardamos los bloques como un string separado por comas (ej: "usuarios,orgs")
         [Required]
-        public string WidgetsVisibles { get; set; } = "usuarios,orgs,activos,recent";
+        public string WidgetsVisibles { get; set; } = "usuarios,orgs,torneos,activos,recent,banner_torneos";
 
         public string Tema { get; set; } = "light";
 

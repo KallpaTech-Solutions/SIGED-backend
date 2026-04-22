@@ -12,7 +12,8 @@ namespace Siged.Application.DTOs.Tournaments.Player
         [Required, MaxLength(100)]
         public string Name { get; set; } = string.Empty;
 
-        [Required, MaxLength(8)] // DNI Peruano
+        /// <summary>Identificador único del jugador: DNI o código de estudiante (ej. 0020180314).</summary>
+        [Required, MaxLength(10)]
         public string Dni { get; set; } = string.Empty;
         public DateTime? BirthDate { get; set; }
 

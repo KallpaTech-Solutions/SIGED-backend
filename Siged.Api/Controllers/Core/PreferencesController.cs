@@ -35,7 +35,7 @@ namespace Siged.Api.Controllers.Core
             // Si no tiene, devolvemos los valores por defecto
             return Ok(new
             {
-                widgetsVisibles = pref?.WidgetsVisibles ?? "usuarios,orgs,activos,recent",
+                widgetsVisibles = pref?.WidgetsVisibles ?? "usuarios,orgs,torneos,activos,recent,banner_torneos",
                 tema = pref?.Tema ?? "light"
             });
         }

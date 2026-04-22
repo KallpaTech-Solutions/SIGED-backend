@@ -1,6 +1,7 @@
 ﻿using System;
 using Microsoft.EntityFrameworkCore;
 using Siged.Application.DTOs.Tournaments.Bracket;
+using Siged.Domain.Entities.Core.Tournaments.Enums;
 using Siged.Infrastructure.Persistence;
 
 namespace Siged.Infrastructure.Services.Tournment
@@ -43,8 +44,8 @@ namespace Siged.Infrastructure.Services.Tournment
                             .Select(m => new BracketMatchDto
                             {
                                 MatchId = m.Id,
-                                LocalName = m.LocalTeam?.Name ?? "Por definir",
-                                VisitorName = m.VisitorTeam?.Name ?? "Por definir",
+                                LocalName = TeamLabel(m.LocalTeam?.Name, m.Status),
+                                VisitorName = TeamLabel(m.VisitorTeam?.Name, m.Status),
                                 LocalScore = m.LocalScore,
                                 VisitorScore = m.VisitorScore,
                                 LocalPenaltyScore = m.LocalPenaltyScore,
@@ -57,6 +58,19 @@ namespace Siged.Infrastructure.Services.Tournment
             };
 
             return response;
+        }
+
+        /// <summary>
+        /// "Por definir" solo cuando el partido sigue abierto y falta asignar rival.
+        /// Si ya está finalizado y falta nombre (hueco/W.O.), se muestra "—" para no contradecir el estado.
+        /// </summary>
+        private static string TeamLabel(string? name, MatchStatus status)
+        {
+            if (!string.IsNullOrWhiteSpace(name))
+                return name;
+            if (status == MatchStatus.Finalizado)
+                return "—";
+            return "Por definir";
         }
     }
 }

@@ -1,9 +1,13 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System;
+using System.Linq;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Siged.Api.Authorization;
 using Siged.Application.DTOs.Tournaments.Player;
 using Siged.Application.DTOs.Tournaments.Team;
 using Siged.Application.Interfaces.Almacenamiento;
+using Siged.Domain.Entities.Core;
 using Siged.Domain.Entities.Core.Tournaments;
 using Siged.Domain.Entities.Security;
 using Siged.Infrastructure.Persistence;
@@ -35,6 +39,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         /// <response code="400">Bad request.</response>
         /// <response code="404">Not found.</response>
         [HttpGet]
+        [AllowAnonymous]
         public async Task<IActionResult> GetAll([FromQuery] bool onlyActive = true)
         {
             var query = _context.Teams
@@ -59,8 +64,126 @@ namespace Siged.Api.Controllers.Core.Tournaments
             return Ok(teams);
         }
 
+        /// <summary>
+        /// Delegados: escuela vinculada al usuario y equipos activos (para inscripción).
+        /// </summary>
+        [HttpGet("me/context")]
+        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        public async Task<IActionResult> GetMyContext()
+        {
+            var orgId = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
+            if (orgId == null)
+                return Ok(new { organizacionId = (int?)null, nombreEscuela = (string?)null, teams = Array.Empty<object>() });
+
+            var org = await _context.Organizaciones.AsNoTracking().FirstOrDefaultAsync(o => o.Id == orgId.Value);
+            var teams = await _context.Teams
+                .AsNoTracking()
+                .Where(t => t.OrganizacionId == orgId.Value && t.IsActive)
+                .OrderBy(t => t.Name)
+                .Select(t => new { t.Id, t.Name, t.Initials })
+                .ToListAsync();
+
+            return Ok(new { organizacionId = orgId, nombreEscuela = org?.Nombre, teams });
+        }
+
+        /// <summary>
+        /// Panel delegado: equipos de la escuela, inscripciones por competencia/torneo y planteles (activos e inactivos).
+        /// </summary>
+        [HttpGet("me/summary")]
+        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        public async Task<IActionResult> GetMyDelegateSummary()
+        {
+            var orgId = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
+            if (orgId == null)
+                return Ok(new { organizacionId = (int?)null, nombreEscuela = (string?)null, teams = Array.Empty<object>() });
+
+            var org = await _context.Organizaciones.AsNoTracking().FirstOrDefaultAsync(o => o.Id == orgId.Value);
+
+            var teamList = await _context.Teams
+                .AsNoTracking()
+                .Where(t => t.OrganizacionId == orgId.Value && t.IsActive)
+                .OrderBy(t => t.Name)
+                .Select(t => new { t.Id, t.Name, t.Initials })
+                .ToListAsync();
+
+            var teamIds = teamList.Select(t => t.Id).ToList();
+            if (teamIds.Count == 0)
+                return Ok(new { organizacionId = orgId, nombreEscuela = org?.Nombre, teams = Array.Empty<object>() });
+
+            var ctRows = await _context.CompetitionTeams
+                .AsNoTracking()
+                .Where(ct => teamIds.Contains(ct.TeamId))
+                .Select(ct => new
+                {
+                    ct.TeamId,
+                    ct.CompetitionId,
+                    TournamentId = ct.Competition.TournamentId,
+                    TournamentName = ct.Competition.Tournament.Name,
+                    DisciplineName = ct.Competition.Discipline.Name,
+                    ct.Competition.CategoryName,
+                    Gender = ct.Competition.Gender
+                })
+                .ToListAsync();
+
+            var playersRaw = await _context.Players
+                .AsNoTracking()
+                .Where(p => teamIds.Contains(p.TeamId))
+                .OrderBy(p => p.Number)
+                .ThenBy(p => p.Name)
+                .ToListAsync();
+
+            static PlayerDto MapPlayer(Player p) => new()
+            {
+                Id = p.Id,
+                TeamId = p.TeamId,
+                Name = p.Name,
+                Dni = p.Dni,
+                BirthDate = p.BirthDate,
+                Number = p.Number,
+                Position = p.Position,
+                PhotoUrl = p.PhotoUrl,
+                IsActive = p.IsActive,
+                IsEligible = p.IsEligible
+            };
+
+            var teamsOut = teamList.Select(team =>
+            {
+                var inscriptions = ctRows
+                    .Where(x => x.TeamId == team.Id)
+                    .GroupBy(x => x.CompetitionId)
+                    .Select(g => g.First())
+                    .Select(x => new
+                    {
+                        competitionId = x.CompetitionId,
+                        tournamentId = x.TournamentId,
+                        tournamentName = x.TournamentName,
+                        competitionLabel = $"{x.DisciplineName} · {x.CategoryName?.Trim() ?? "—"} · {x.Gender}"
+                    })
+                    .OrderBy(x => x.tournamentName)
+                    .ThenBy(x => x.competitionLabel)
+                    .ToList();
+
+                var players = playersRaw
+                    .Where(p => p.TeamId == team.Id)
+                    .Select(MapPlayer)
+                    .ToList();
+
+                return new
+                {
+                    team.Id,
+                    team.Name,
+                    team.Initials,
+                    inscriptions,
+                    players
+                };
+            }).ToList();
+
+            return Ok(new { organizacionId = orgId, nombreEscuela = org?.Nombre, teams = teamsOut });
+        }
+
         [HttpGet("{id}")]
-        public async Task<IActionResult> GetById(Guid id)
+        [AllowAnonymous]
+        public async Task<IActionResult> GetById(Guid id, [FromQuery] bool includeInactive = false)
         {
             var team = await _context.Teams
                 .Include(t => t.Players)
@@ -68,7 +191,41 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
             if (team == null) return NotFound();
 
-            // Mapeamos a nuestro DTO de detalle
+            var showInactive = includeInactive;
+            if (showInactive)
+            {
+                if (User?.Identity?.IsAuthenticated != true)
+                    showInactive = false;
+                else if (!TournDelegateAuth.IsTournamentAdmin(User))
+                {
+                    var myOrg = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
+                    if (myOrg == null || team.OrganizacionId != myOrg.Value)
+                        showInactive = false;
+                }
+            }
+
+            IEnumerable<Player> playerQuery = team.Players;
+            if (!showInactive)
+                playerQuery = playerQuery.Where(p => p.IsActive);
+
+            var playersOrdered = playerQuery
+                .OrderBy(p => p.Number)
+                .ThenBy(p => p.Name)
+                .Select(p => new PlayerDto
+                {
+                    Id = p.Id,
+                    TeamId = p.TeamId,
+                    Name = p.Name,
+                    Dni = p.Dni,
+                    BirthDate = p.BirthDate,
+                    Number = p.Number,
+                    Position = p.Position,
+                    PhotoUrl = p.PhotoUrl,
+                    IsActive = p.IsActive,
+                    IsEligible = p.IsEligible
+                })
+                .ToList();
+
             var response = new TeamDetailsDto
             {
                 Id = team.Id,
@@ -76,20 +233,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 Initials = team.Initials,
                 LogoUrl = team.LogoUrl,
                 RepresentativeName = team.RepresentativeName,
-                Players = team.Players
-                    .Where(p => p.IsActive)
-                    .Select(p => new PlayerDto
-                    {
-                        Id = p.Id,
-                        TeamId = p.TeamId,
-                        Name = p.Name,
-                        Dni = p.Dni,
-                        Number = p.Number,
-                        Position = p.Position,
-                        PhotoUrl = p.PhotoUrl,
-                        IsActive = p.IsActive,
-                        IsEligible = p.IsEligible
-                    }).ToList()
+                Players = playersOrdered
             };
 
             return Ok(response);
@@ -98,15 +242,30 @@ namespace Siged.Api.Controllers.Core.Tournaments
         // --- CREACIÓN ---
 
         [HttpPost]
-        [Authorize(Policy = Permissions.TournManage)]
+        [Authorize(Policy = TournDelegateAuth.PolicyName)]
         public async Task<IActionResult> Create([FromForm] CreateTeamDto dto)
         {
-            // 🛡️ Validación de Ingeniería: ¿La escuela existe y es válida?
-            var org = await _context.Organizaciones.FindAsync(dto.OrganizacionId);
+            // Delegado: el OrganizacionId viene siempre del usuario (no del formulario).
+            int organizacionIdEquipo;
+            if (!TournDelegateAuth.IsTournamentAdmin(User))
+            {
+                var myOrg = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
+                if (myOrg == null) return BadRequest("Tu usuario no tiene escuela asignada.");
+                organizacionIdEquipo = myOrg.Value;
+            }
+            else
+            {
+                organizacionIdEquipo = dto.OrganizacionId;
+                if (organizacionIdEquipo <= 0)
+                    return BadRequest("Indicá la organización (OrganizacionId).");
+            }
+
+            var org = await _context.Organizaciones.FindAsync(organizacionIdEquipo);
             if (org == null) return BadRequest("La organización no existe.");
 
-            if (org.Tipo != "Escuela")
-                return BadRequest("Solo se pueden crear equipos vinculados a una 'Escuela'.");
+            if (!OrganizationCanFieldTeams(org))
+                return BadRequest(
+                    "Solo se pueden crear equipos vinculados a una organización de tipo Escuela o Facultad.");
 
             string? logoUrl = dto.LogoFile != null
                 ? await _storageService.UploadFileAsync(dto.LogoFile, "equipos")
@@ -115,7 +274,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
             var team = new Team
             {
                 Name = dto.Name,
-                OrganizacionId = dto.OrganizacionId, // 🔗 El vínculo vital
+                OrganizacionId = organizacionIdEquipo,
                 Initials = dto.Initials?.ToUpper(),
                 RepresentativeName = dto.RepresentativeName,
                 LogoUrl = logoUrl,
@@ -131,10 +290,18 @@ namespace Siged.Api.Controllers.Core.Tournaments
         // --- EDICIÓN ---
 
         [HttpPut("{id}")]
+        [Authorize(Policy = TournDelegateAuth.PolicyName)]
         public async Task<IActionResult> Update(Guid id, [FromForm] CreateTeamDto dto)
         {
             var team = await _context.Teams.FindAsync(id);
             if (team == null) return NotFound();
+
+            if (!TournDelegateAuth.IsTournamentAdmin(User))
+            {
+                var myOrg = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
+                if (myOrg == null || team.OrganizacionId != myOrg.Value)
+                    return Forbid();
+            }
 
             if (dto.LogoFile != null)
             {
@@ -152,6 +319,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         // --- ESTADO Y ELIMINACIÓN ---
 
         [HttpPatch("{id}/status")]
+        [Authorize(Policy = Permissions.TournManage)]
         public async Task<IActionResult> ToggleStatus(Guid id)
         {
             var team = await _context.Teams.FindAsync(id);
@@ -163,6 +331,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Policy = Permissions.TournManage)]
         public async Task<IActionResult> HardDelete(Guid id)
         {
             var team = await _context.Teams
@@ -178,6 +347,14 @@ namespace Siged.Api.Controllers.Core.Tournaments
             _context.Teams.Remove(team);
             await _context.SaveChangesAsync();
             return NoContent();
+        }
+
+        /// <summary>Equipos de torneo se asocian a facultades o escuelas (no a la universidad raíz u otros tipos).</summary>
+        private static bool OrganizationCanFieldTeams(Organizacion org)
+        {
+            var t = (org.Tipo ?? string.Empty).Trim();
+            return t.Equals("Escuela", StringComparison.OrdinalIgnoreCase)
+                || t.Equals("Facultad", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

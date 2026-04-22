@@ -1,10 +1,13 @@
 ﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Siged.Api.Authorization;
 using Siged.Domain.Entities.Security;
 using Siged.Infrastructure.Persistence;
 using Siged.Infrastructure.Services.Security;
+using System.Linq;
 using System.Text;
 
 namespace Siged.Api.Extensions;
@@ -33,6 +36,9 @@ public static class ServiceExtensions
             c.AddSecurityRequirement(new OpenApiSecurityRequirement {
                 { new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } }, new string[] { } }
             });
+            // Evita colisión de nombres cortos entre DTOs (Swagger 500) y documenta multipart.
+            c.CustomSchemaIds(type => type.FullName!.Replace("+", "."));
+            c.MapType<IFormFile>(() => new OpenApiSchema { Type = "string", Format = "binary" });
         });
         return services;
     }
@@ -82,6 +88,17 @@ public static class ServiceExtensions
                 options.AddPolicy(permission, policy =>
                     policy.Requirements.Add(new PermissionRequirement(permission)));
             }
+
+            // Inscripción de equipos y gestión de plantel: admin OTI o delegado (tourn.team.manage)
+            options.AddPolicy(TournDelegateAuth.PolicyName, policy =>
+                policy.RequireAssertion(ctx =>
+                {
+                    var p = ctx.User.FindAll("permission").Select(c => c.Value).ToHashSet();
+                    return p.Contains(Permissions.TournManage) || p.Contains(Permissions.TournTeamManage);
+                }));
+
+            options.AddPolicy(TournFormatSetupAuth.PolicyName, policy =>
+                policy.RequireAssertion(ctx => TournFormatSetupAuth.CanSetupFormat(ctx.User)));
         });
 
         return services;

@@ -2,8 +2,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Siged.Application.DTOs.Tournaments;
+using Siged.Api.Services;
 using Siged.Application.Interfaces.Almacenamiento;
 using Siged.Domain.Entities.Core.Tournaments;
+using Siged.Domain.Entities.Core.Tournaments.Enums;
 using Siged.Domain.Entities.Security; 
 using Siged.Infrastructure.Persistence;
 using System.Linq;
@@ -19,11 +21,16 @@ namespace Siged.Api.Controllers.Core.Tournaments
     {
         private readonly ApplicationDbContext _context;
         private readonly IMediaStorageService _storageService;
+        private readonly TournamentVitrinaBroadcastService _vitrina;
 
-        public TournamentsController(ApplicationDbContext context, IMediaStorageService storageService)
+        public TournamentsController(
+            ApplicationDbContext context,
+            IMediaStorageService storageService,
+            TournamentVitrinaBroadcastService vitrina)
         {
             _context = context;
             _storageService = storageService;
+            _vitrina = vitrina;
         }
 
         /// <summary>
@@ -69,6 +76,89 @@ namespace Siged.Api.Controllers.Core.Tournaments
             if (tournament == null) return NotFound();
             return Ok(tournament);
         }
+
+        /// <summary>
+        /// Vitrina pública: torneo con competencias, equipos inscritos y datos de disciplina (una sola petición).
+        /// </summary>
+        [HttpGet("{id}/public-detail")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetPublicDetail(Guid id)
+        {
+            var tournament = await _context.Tournaments
+                .AsNoTracking()
+                .Include(t => t.Competitions)
+                    .ThenInclude(c => c.Discipline)
+                .Include(t => t.Competitions)
+                    .ThenInclude(c => c.CompetitionTeams)
+                        .ThenInclude(ct => ct.Team)
+                            .ThenInclude(tm => tm.Organizacion)
+                .FirstOrDefaultAsync(t => t.Id == id);
+
+            if (tournament == null || !tournament.IsActive)
+                return NotFound();
+
+            var competitions = tournament.Competitions
+                .Where(c => c.IsActive)
+                .OrderBy(c => c.Discipline.Name)
+                .ThenBy(c => c.CategoryName)
+                .Select(c => new
+                {
+                    c.Id,
+                    c.DisciplineId,
+                    DisciplineName = c.Discipline.Name,
+                    Gender = c.Gender.ToString(),
+                    c.CategoryName,
+                    Teams = c.CompetitionTeams
+                        .Where(ct => ct.Team.IsActive)
+                        .OrderBy(ct => ct.Team.Name)
+                        .Select(ct => new
+                        {
+                            ct.Id,
+                            ct.TeamId,
+                            TeamName = ct.Team.Name,
+                            ct.Team.Initials,
+                            ct.Team.LogoUrl,
+                            Escuela = ct.Team.Organizacion != null ? ct.Team.Organizacion.Nombre : null,
+                            ct.Puntos,
+                            ct.PartidosJugados,
+                            ct.EstaDescalificado
+                        })
+                        .ToList()
+                })
+                .ToList();
+
+            var compIds = tournament.Competitions.Where(c => c.IsActive).Select(c => c.Id).ToList();
+            var scheduledMatchCount = 0;
+            if (compIds.Count > 0)
+            {
+                scheduledMatchCount = await (
+                    from m in _context.Matches.AsNoTracking()
+                    join p in _context.Phases.AsNoTracking() on m.PhaseId equals p.Id
+                    where compIds.Contains(p.CompetitionId)
+                    select m
+                ).CountAsync();
+            }
+
+            var result = new
+            {
+                tournament.Id,
+                tournament.Name,
+                tournament.Year,
+                tournament.Description,
+                tournament.LogoUrl,
+                tournament.RulesUrl,
+                tournament.StartDate,
+                tournament.EndDate,
+                tournament.Organizer,
+                Status = tournament.Status.ToString(),
+                StatusValue = (int)tournament.Status,
+                ScheduledMatchCount = scheduledMatchCount,
+                Competitions = competitions
+            };
+
+            return Ok(result);
+        }
+
         /// <summary>
         /// Obtiene métricas rápidas del torneo (Equipos, Partidos, Jugadores).
         /// </summary>
@@ -142,11 +232,14 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 EndDate = dto.EndDate,
                 Organizer = dto.Organizer,
                 LogoUrl = logoUrl,
-                IsActive = true
+                IsActive = true,
+                // Vitrina: no mostrar "Borrador"; al crear desde el panel el torneo queda en inscripciones.
+                Status = TournamentStatus.InscripcionesAbiertas,
             };
 
             _context.Tournaments.Add(tournament);
             await _context.SaveChangesAsync();
+            await _vitrina.NotifyTournamentsRefreshAsync();
             return CreatedAtAction(nameof(GetById), new { id = tournament.Id }, tournament);
         }
 
@@ -174,7 +267,54 @@ namespace Siged.Api.Controllers.Core.Tournaments
             tournament.Organizer = dto.Organizer;
 
             await _context.SaveChangesAsync();
+            await _vitrina.NotifyTournamentsRefreshAsync();
             return Ok(tournament);
+        }
+
+        /// <summary>
+        /// Cambia la etapa del ciclo de vida (Borrador, Inscripciones, Programado, Activo, Finalizado).
+        /// </summary>
+        [HttpPatch("{id}/lifecycle-status")]
+        [Authorize(Policy = Permissions.TournManage)]
+        public async Task<IActionResult> PatchLifecycleStatus(Guid id, [FromBody] PatchTournamentStatusDto dto)
+        {
+            if (!Enum.IsDefined(typeof(TournamentStatus), dto.Status))
+                return BadRequest(new { message = "Estado de torneo no válido." });
+
+            var tournament = await _context.Tournaments.FindAsync(id);
+            if (tournament == null) return NotFound();
+
+            tournament.Status = dto.Status;
+            await _context.SaveChangesAsync();
+            await _vitrina.NotifyTournamentsRefreshAsync();
+            return Ok(new { id = tournament.Id, status = tournament.Status.ToString(), statusValue = (int)tournament.Status });
+        }
+
+        /// <summary>
+        /// Sube o reemplaza el PDF del reglamento del torneo.
+        /// </summary>
+        [HttpPatch("{id}/rules")]
+        [Authorize(Policy = Permissions.TournManage)]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> PatchRules(Guid id, [FromForm] PatchTournamentRulesDto dto)
+        {
+            var rulesFile = dto?.RulesFile;
+            if (rulesFile == null || rulesFile.Length == 0)
+                return BadRequest(new { message = "Enviá un archivo PDF." });
+
+            var name = rulesFile.FileName ?? "";
+            var isPdf = name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
+                        || (rulesFile.ContentType?.Contains("pdf", StringComparison.OrdinalIgnoreCase) ?? false);
+            if (!isPdf)
+                return BadRequest(new { message = "Solo se permiten archivos PDF." });
+
+            var tournament = await _context.Tournaments.FindAsync(id);
+            if (tournament == null) return NotFound();
+
+            tournament.RulesUrl = await _storageService.UploadFileAsync(rulesFile, "torneos/reglamentos");
+            await _context.SaveChangesAsync();
+            await _vitrina.NotifyTournamentsRefreshAsync();
+            return Ok(new { id = tournament.Id, rulesUrl = tournament.RulesUrl });
         }
 
         // --- ESTADO Y ELIMINACIÓN ---
@@ -190,6 +330,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
             tournament.IsActive = !tournament.IsActive;
             await _context.SaveChangesAsync();
+            await _vitrina.NotifyTournamentsRefreshAsync();
             return Ok(new { id, isActive = tournament.IsActive });
         }
 
@@ -213,6 +354,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
             _context.Tournaments.Remove(tournament);
             await _context.SaveChangesAsync();
+            await _vitrina.NotifyTournamentsRefreshAsync();
             return NoContent();
         }
     }

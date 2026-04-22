@@ -12,5 +12,6 @@ namespace Siged.Application.DTOs.Tournaments.Match
         public string? Note { get; set; }
         public int Value { get; set; }
         public int Period { get; set; }
+        public DateTime? OccurredAt { get; set; }
     }
 }

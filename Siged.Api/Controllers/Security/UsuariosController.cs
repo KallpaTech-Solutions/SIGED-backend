@@ -189,8 +189,16 @@ namespace Siged.Api.Controllers.Security
             usuario.Persona.Correo = dto.Correo ?? usuario.Persona.Correo;
             usuario.Persona.DNI = dto.Dni ?? usuario.Persona.DNI;
 
+            // Facultad / sede (delegados, encargados, estudiantes, etc.)
+            usuario.OrganizacionId = dto.OrganizacionId;
+
             if (usuario.Persona is Administrador admin && dto.DependenciaId.HasValue) admin.DependenciaId = dto.DependenciaId.Value;
             else if (usuario.Persona is Estudiante est && !string.IsNullOrWhiteSpace(dto.CodigoEstudiante)) est.CodigoEstudiante = dto.CodigoEstudiante;
+            else if (usuario.Persona is Encargado enc)
+            {
+                if (dto.Cargo != null) enc.Cargo = dto.Cargo;
+                if (dto.Oficina != null) enc.Oficina = dto.Oficina;
+            }
 
             await _context.SaveChangesAsync();
             return Ok(new { message = "Actualizado correctamente." });

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Siged.Api.Extensions;
 using Siged.Api.Hubs;
+using Siged.Api.Services;
 using Siged.Application.Interfaces.Almacenamiento;
 using Siged.Infrastructure;
 using Siged.Infrastructure.Persistence;
@@ -25,11 +26,13 @@ builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 builder.Services.AddHttpClient<IMediaStorageService, SupabaseMediaStorageService>();
 builder.Services.AddScoped<FixtureService>();
 builder.Services.AddScoped<PlayoffService>();
+builder.Services.AddScoped<CompetitionFormatSetupService>();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<StandingsService>();
 builder.Services.AddScoped<TournamentManagerService>();
 builder.Services.AddScoped<DisciplineRuleService>();
 builder.Services.AddScoped<BracketService>();
+builder.Services.AddSingleton<TournamentVitrinaBroadcastService>();
 
 // Extensiones de arquitectura y seguridad
 builder.Services.AddInfrastructure(builder.Configuration);

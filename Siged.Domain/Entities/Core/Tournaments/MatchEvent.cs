@@ -1,4 +1,5 @@
-﻿using Siged.Domain.Entities.Core.Tournaments.Enums;
+﻿using System;
+using Siged.Domain.Entities.Core.Tournaments.Enums;
 
 namespace Siged.Domain.Entities.Core.Tournaments
 {
@@ -7,6 +8,8 @@ namespace Siged.Domain.Entities.Core.Tournaments
         public Guid Id { get; set; } = Guid.NewGuid();
         public Guid MatchId { get; set; }
         public virtual Match Match { get; set; } = null!;
+        /// <summary>Momento UTC en que se registró el evento (cronómetro en vivo). Null en datos antiguos.</summary>
+        public DateTime? OccurredAt { get; set; }
         public int Minute { get; set; } // Min 15, 45, etc.
         public MatchEventType Type { get; set; } // Gol, Tarjeta Amarilla, Roja
 
