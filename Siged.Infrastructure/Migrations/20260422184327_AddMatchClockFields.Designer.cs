@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Siged.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Siged.Infrastructure.Persistence;
 namespace Siged.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260422184327_AddMatchClockFields")]
+    partial class AddMatchClockFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -270,21 +273,6 @@ namespace Siged.Infrastructure.Migrations
                         new
                         {
                             PermisosIdPermiso = "tourn.match.control",
-                            RolesId = 3
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.match.widgets",
-                            RolesId = 1
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.match.widgets",
-                            RolesId = 2
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.match.widgets",
                             RolesId = 3
                         });
                 });
@@ -755,35 +743,35 @@ namespace Siged.Infrastructure.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("6e4ccdec-405a-45b7-af5c-ead56b6b985b"),
+                            Id = new Guid("093e3405-0ecf-44c3-81b5-08cf92e07b19"),
                             DisciplineId = new Guid("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c"),
                             RuleKey = "TIENE_TARJETAS",
                             RuleValue = "True"
                         },
                         new
                         {
-                            Id = new Guid("373e99c0-270a-4534-b935-9034c588be5e"),
+                            Id = new Guid("cca57dfd-e7dd-4758-bce0-baad706c0ef9"),
                             DisciplineId = new Guid("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c"),
                             RuleKey = "PUNTOS_POR_VICTORIA",
                             RuleValue = "3"
                         },
                         new
                         {
-                            Id = new Guid("bd990fc4-505e-49d5-aa8e-216d9744e60c"),
+                            Id = new Guid("7acbadae-da59-4444-bf98-98637647d997"),
                             DisciplineId = new Guid("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e"),
                             RuleKey = "USA_SETS",
                             RuleValue = "True"
                         },
                         new
                         {
-                            Id = new Guid("7313e65f-046b-4d4a-99c3-cd0bf2d1c7ca"),
+                            Id = new Guid("50815a35-831a-49e3-a022-2c0588c8962a"),
                             DisciplineId = new Guid("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e"),
                             RuleKey = "PUNTOS_POR_VICTORIA",
                             RuleValue = "2"
                         },
                         new
                         {
-                            Id = new Guid("e8581399-c8a7-4ed5-bd3f-e31c4f11c536"),
+                            Id = new Guid("2a8bf7f5-c7aa-4179-81fa-fcb98096ea60"),
                             DisciplineId = new Guid("c1d2e3f4-a5b6-4c8d-9e0f-1a2b3c4d5e6f"),
                             RuleKey = "CANTIDAD_PERIODOS",
                             RuleValue = "4"
@@ -898,18 +886,13 @@ namespace Siged.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<int>("ClockAccumulatedSeconds")
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("ClockPeriodAnchorUtc")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<int>("ClockWidgetKind")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
-                    b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<Guid>("DisciplineId")
@@ -1002,9 +985,6 @@ namespace Siged.Infrastructure.Migrations
                     b.Property<Guid?>("PlayerId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("RelatedPlayerId")
-                        .HasColumnType("uuid");
-
                     b.Property<Guid>("TeamId")
                         .HasColumnType("uuid");
 
@@ -1019,8 +999,6 @@ namespace Siged.Infrastructure.Migrations
                     b.HasIndex("MatchId");
 
                     b.HasIndex("PlayerId");
-
-                    b.HasIndex("RelatedPlayerId");
 
                     b.ToTable("MatchEvents");
                 });
@@ -1111,9 +1089,6 @@ namespace Siged.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<int?>("CreatedByUsuarioId")
-                        .HasColumnType("integer");
-
                     b.Property<string>("Initials")
                         .HasMaxLength(5)
                         .HasColumnType("character varying(5)");
@@ -1137,42 +1112,9 @@ namespace Siged.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CreatedByUsuarioId");
-
                     b.HasIndex("OrganizacionId");
 
                     b.ToTable("Teams");
-                });
-
-            modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.TeamGestor", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("AssignedAt")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<int?>("AssignedByUsuarioId")
-                        .HasColumnType("integer");
-
-                    b.Property<byte>("Kind")
-                        .HasColumnType("smallint");
-
-                    b.Property<Guid>("TeamId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("UsuarioId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UsuarioId");
-
-                    b.HasIndex("TeamId", "UsuarioId")
-                        .IsUnique();
-
-                    b.ToTable("TeamGestores", (string)null);
                 });
 
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.Tournament", b =>
@@ -1249,14 +1191,14 @@ namespace Siged.Infrastructure.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("e4773948-a1df-40fc-bcfe-e92441ed5600"),
+                            Id = new Guid("9496a2db-db5f-4dbd-941f-be612b01142c"),
                             Address = "Campus Principal",
                             Capacity = 5000,
                             Name = "Estadio Universitario UNAS"
                         },
                         new
                         {
-                            Id = new Guid("3f49a6d1-0628-4eee-be5d-f1d6d9766f36"),
+                            Id = new Guid("cb826a37-c433-44aa-b316-36a185f33b81"),
                             Address = "Pabellón de Sistemas",
                             Capacity = 200,
                             Name = "Losa Deportiva FIIS"
@@ -1463,12 +1405,6 @@ namespace Siged.Infrastructure.Migrations
                             IdPermiso = "tourn.match.control",
                             Categoria = "TORNEOS",
                             Descripcion = "Control de mesa: registro de eventos y actas"
-                        },
-                        new
-                        {
-                            IdPermiso = "tourn.match.widgets",
-                            Categoria = "TORNEOS",
-                            Descripcion = "Widgets de transmisión: tableros y tiempos en vivo"
                         });
                 });
 
@@ -1758,7 +1694,7 @@ namespace Siged.Infrastructure.Migrations
                             Nombres = "Pedro",
                             CodigoEstudiante = "0020210456",
                             EstaMatriculado = true,
-                            FechaRegistro = new DateTime(2026, 4, 24, 22, 23, 23, 918, DateTimeKind.Utc).AddTicks(4147)
+                            FechaRegistro = new DateTime(2026, 4, 22, 0, 48, 28, 374, DateTimeKind.Utc).AddTicks(960)
                         });
                 });
 
@@ -1980,16 +1916,9 @@ namespace Siged.Infrastructure.Migrations
                         .WithMany("MatchEvents")
                         .HasForeignKey("PlayerId");
 
-                    b.HasOne("Siged.Domain.Entities.Core.Tournaments.Player", "RelatedPlayer")
-                        .WithMany()
-                        .HasForeignKey("RelatedPlayerId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.Navigation("Match");
 
                     b.Navigation("Player");
-
-                    b.Navigation("RelatedPlayer");
                 });
 
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.Phase", b =>
@@ -2016,39 +1945,13 @@ namespace Siged.Infrastructure.Migrations
 
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.Team", b =>
                 {
-                    b.HasOne("Siged.Domain.Entities.Security.Usuario", "CreatedByUsuario")
-                        .WithMany()
-                        .HasForeignKey("CreatedByUsuarioId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Siged.Domain.Entities.Core.Organizacion", "Organizacion")
                         .WithMany("Equipos")
                         .HasForeignKey("OrganizacionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("CreatedByUsuario");
-
                     b.Navigation("Organizacion");
-                });
-
-            modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.TeamGestor", b =>
-                {
-                    b.HasOne("Siged.Domain.Entities.Core.Tournaments.Team", "Team")
-                        .WithMany("Gestores")
-                        .HasForeignKey("TeamId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Siged.Domain.Entities.Security.Usuario", "Usuario")
-                        .WithMany("EquiposGestionados")
-                        .HasForeignKey("UsuarioId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Team");
-
-                    b.Navigation("Usuario");
                 });
 
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.Venue", b =>
@@ -2181,8 +2084,6 @@ namespace Siged.Infrastructure.Migrations
                 {
                     b.Navigation("CompetitionTeams");
 
-                    b.Navigation("Gestores");
-
                     b.Navigation("GroupTeams");
 
                     b.Navigation("Players");
@@ -2196,11 +2097,6 @@ namespace Siged.Infrastructure.Migrations
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.VenueComplex", b =>
                 {
                     b.Navigation("Venues");
-                });
-
-            modelBuilder.Entity("Siged.Domain.Entities.Security.Usuario", b =>
-                {
-                    b.Navigation("EquiposGestionados");
                 });
 #pragma warning restore 612, 618
         }

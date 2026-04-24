@@ -6,6 +6,8 @@ namespace Siged.Api.Hubs
     {
         public const string LandingFeedGroup = "landing-feed";
         public const string TournamentsFeedGroup = "tournaments-feed";
+        /// <summary>Widget ZonaHoraria (demo): estado público sincronizado desde el API.</summary>
+        public const string ZonaHorariaFeedGroup = "zona-horaria-feed";
 
         /// <summary>Vitrina: GET /api/Matches/public/landing cuando cambia el conjunto de partidos visibles.</summary>
         public async Task JoinLandingFeed() =>
@@ -22,5 +24,8 @@ namespace Siged.Api.Hubs
             // Forzamos ToLower() para que el nombre del grupo sea siempre consistente
             await Groups.AddToGroupAsync(Context.ConnectionId, matchId.ToLower());
         }
+
+        public Task JoinZonaHorariaFeed() =>
+            Groups.AddToGroupAsync(Context.ConnectionId, ZonaHorariaFeedGroup);
     }
 }

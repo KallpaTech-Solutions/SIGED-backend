@@ -16,6 +16,12 @@ namespace Siged.Application.DTOs.Tournaments.Team
 
         public string? RepresentativeName { get; set; } // Nombre del delegado
 
+        /// <summary>
+        /// Obligatorio si quien crea es SuperAdmin: ID del usuario que será delegado principal del equipo
+        /// (debe pertenecer a <see cref="OrganizacionId"/>). Los delegados de escuela ignoran este campo.
+        /// </summary>
+        public int? PrincipalUsuarioId { get; set; }
+
         // El archivo físico que viene desde Swagger o React
         public IFormFile? LogoFile { get; set; }
     }

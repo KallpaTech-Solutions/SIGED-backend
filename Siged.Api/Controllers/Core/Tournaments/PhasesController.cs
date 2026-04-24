@@ -41,6 +41,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
                     p.Name,
                     p.Type,
                     p.Order,
+                    p.IsDirectElimination,
                     GroupsCount = p.Groups.Count,
                     // Si es Knockout, nos interesará saber cuántos equipos hay
                     TotalTeams = p.Groups.Sum(g => g.GroupTeams.Count)

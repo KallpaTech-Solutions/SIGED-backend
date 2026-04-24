@@ -82,6 +82,8 @@ public static class ServiceExtensions
 
         // Handler y Políticas dinámicas (Esto se mantiene igual)
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, PermissionHandler>();
+        // Scoped: usa ApplicationDbContext (no puede ser Singleton).
+        services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, TournDelegateOrTeamGestorHandler>();
         services.AddAuthorization(options => {
             foreach (var permission in Permissions.GetAllNames())
             {
@@ -97,8 +99,27 @@ public static class ServiceExtensions
                     return p.Contains(Permissions.TournManage) || p.Contains(Permissions.TournTeamManage);
                 }));
 
+            // Misma área funcional, pero también usuarios con fila en TeamGestores (co-delegados).
+            options.AddPolicy(TournDelegateOrTeamGestorAuth.PolicyName, policy =>
+                policy.Requirements.Add(new TournDelegateOrTeamGestorRequirement()));
+
             options.AddPolicy(TournFormatSetupAuth.PolicyName, policy =>
                 policy.RequireAssertion(ctx => TournFormatSetupAuth.CanSetupFormat(ctx.User)));
+
+            // Detalle de partido para mesa: control de acta o gestión de torneo (evita 403 a Admin OTI sin match.control).
+            options.AddPolicy("tourn.mesa.detail", policy =>
+                policy.RequireAssertion(ctx =>
+                {
+                    var p = ctx.User.FindAll("permission").Select(c => c.Value).ToHashSet();
+                    return p.Contains(Permissions.TournMatchControl) || p.Contains(Permissions.TournManage);
+                }));
+
+            options.AddPolicy(Permissions.TournMesaBroadcast, policy =>
+                policy.RequireAssertion(ctx =>
+                {
+                    var p = ctx.User.FindAll("permission").Select(c => c.Value).ToHashSet();
+                    return p.Contains(Permissions.TournMatchControl) || p.Contains(Permissions.TournMatchWidgets);
+                }));
         });
 
         return services;

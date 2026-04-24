@@ -16,6 +16,12 @@ namespace Siged.Domain.Entities.Core.Tournaments.Enums
         Sustitucion = 6,
         Falta = 7,
         InicioPeriodo = 8, // Para marcar cuando empieza el 2T o el Set 3
-        FinPeriodo = 9
+        FinPeriodo = 9,
+        /// <summary>Fuera de juego (fútbol).</summary>
+        Offside = 10,
+        /// <summary>Tiro total (fútbol; estadística de vitrina).</summary>
+        Tiro = 11,
+        /// <summary>Tiro a puerta (fútbol).</summary>
+        TiroAPuerta = 12,
     }
 }

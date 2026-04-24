@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +20,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
+        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
         options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
         options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
     });
@@ -27,12 +30,21 @@ builder.Services.AddHttpClient<IMediaStorageService, SupabaseMediaStorageService
 builder.Services.AddScoped<FixtureService>();
 builder.Services.AddScoped<PlayoffService>();
 builder.Services.AddScoped<CompetitionFormatSetupService>();
-builder.Services.AddSignalR();
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+    {
+        options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+        // Para que clockPeriodAnchorUtc: null llegue al cliente al pausar (limpiar ancla).
+        options.PayloadSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.Never;
+    });
+builder.Services.AddScoped<MatchSportRulesBuilder>();
 builder.Services.AddScoped<StandingsService>();
 builder.Services.AddScoped<TournamentManagerService>();
 builder.Services.AddScoped<DisciplineRuleService>();
 builder.Services.AddScoped<BracketService>();
 builder.Services.AddSingleton<TournamentVitrinaBroadcastService>();
+builder.Services.AddSingleton<ZonaHorariaPublicStateStore>();
+builder.Services.AddSingleton<MatchBroadcastWidgetStore>();
 
 // Extensiones de arquitectura y seguridad
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -40,11 +52,6 @@ builder.Services.AddSwaggerCustom();
 builder.Services.AddSecurityConfiguration(builder.Configuration);
 builder.Services.AddCustomCors(builder.Configuration);
 
-
-// --- DEBUG: Añade esto temporalmente ---
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-Console.WriteLine($"🔍 CADENA ACTIVA: {connectionString}");
-// ---------------------------------------
 // Health Checks para monitoreo en Render
 var conn = builder.Configuration.GetConnectionString("DefaultConnection")!;
 builder.Services.AddHealthChecks().AddNpgSql(conn);
@@ -96,12 +103,12 @@ app.UseRouting();
 app.UseCors("AllowReactApp");
 app.MapHub<TournamentHub>("/tournamentHub");
 
-// Swagger habilitado en la raíz para facilitar pruebas
+// Swagger: UI en /swagger y /swagger/index.html; el spec JSON en /swagger/v1/swagger.json
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "SIGED - API UNAS V1");
-    c.RoutePrefix = string.Empty;
+    c.RoutePrefix = "swagger";
 });
 
 app.UseHttpsRedirection();
@@ -112,6 +119,7 @@ app.UseAuthorization();
 
 app.MapHealthChecks("/health");
 app.MapControllers();
+app.MapGet("/", () => Results.Redirect("/swagger"));
 
 app.Run();
 

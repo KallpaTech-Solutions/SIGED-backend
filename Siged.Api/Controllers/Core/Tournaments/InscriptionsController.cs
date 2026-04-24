@@ -22,7 +22,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         public InscriptionsController(ApplicationDbContext context) => _context = context;
 
         [HttpPost]
-        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
         public async Task<IActionResult> Inscribe([FromBody] InscribeTeamDto dto)
         {
             var competition = await _context.Competitions
@@ -39,12 +39,8 @@ namespace Siged.Api.Controllers.Core.Tournaments
             var team = await _context.Teams.AsNoTracking().FirstOrDefaultAsync(t => t.Id == dto.TeamId);
             if (team == null) return BadRequest("Equipo no encontrado.");
 
-            if (!TournDelegateAuth.IsTournamentAdmin(User))
-            {
-                var orgId = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
-                if (orgId == null || team.OrganizacionId != orgId.Value)
-                    return Forbid();
-            }
+            if (!await TeamManagementAuthorization.CanManageTeamAsync(User, _context, team.Id))
+                return Forbid();
 
             // 1. Validar si ya existe la inscripción
             var exists = await _context.CompetitionTeams.AnyAsync(ct => ct.CompetitionId == dto.CompetitionId && ct.TeamId == dto.TeamId);

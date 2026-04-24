@@ -17,6 +17,10 @@ namespace Siged.Domain.Entities.Core.Tournaments
         public Guid? PlayerId { get; set; } // ¿Qué jugador lo hizo? (Opcional)
         public virtual Player? Player { get; set; }
 
+        /// <summary>Sustitución: jugador que entra (el que sale va en <see cref="PlayerId"/>).</summary>
+        public Guid? RelatedPlayerId { get; set; }
+        public virtual Player? RelatedPlayer { get; set; }
+
         public string? Note { get; set; } // Ej: "Gol de cabeza"
 
         public int Value { get; set; } // 1 para gol, 3 para triple

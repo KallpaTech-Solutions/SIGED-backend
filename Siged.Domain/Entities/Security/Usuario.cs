@@ -1,4 +1,5 @@
 ﻿using Siged.Domain.Entities.Core;
+using Siged.Domain.Entities.Core.Tournaments;
 
 namespace Siged.Domain.Entities.Security;
 
@@ -27,4 +28,6 @@ public class Usuario
     public Usuario? Creador { get; set; }
     public bool RequiereCambioPassword { get; set; } = true; // Por defecto true al crear
     public DateTime FechaRegistro { get; set; } = DateTime.UtcNow;
+
+    public virtual ICollection<TeamGestor> EquiposGestionados { get; set; } = new List<TeamGestor>();
 }

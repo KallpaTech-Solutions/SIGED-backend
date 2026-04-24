@@ -16,6 +16,9 @@ namespace Siged.Application.DTOs.Tournaments.Match
 
         public Guid? PlayerId { get; set; }
 
+        /// <summary>Sustitución: jugador que entra.</summary>
+        public Guid? RelatedPlayerId { get; set; }
+
         public string? Note { get; set; }
 
         // --- Campos para multideporte ---

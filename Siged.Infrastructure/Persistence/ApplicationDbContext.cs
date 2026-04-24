@@ -37,6 +37,7 @@ namespace Siged.Infrastructure.Persistence
         public DbSet<Discipline> Disciplines { get; set; }
         public DbSet<DisciplineRule> DisciplineRules { get; set; }
         public DbSet<Team> Teams { get; set; }
+        public DbSet<TeamGestor> TeamGestores { get; set; }
         public DbSet<Player> Players { get; set; }
         public DbSet<VenueComplex> VenueComplexes { get; set; }
         public DbSet<Venue> Venues { get; set; }

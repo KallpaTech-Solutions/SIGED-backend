@@ -59,6 +59,7 @@ namespace Siged.Domain.Entities.Security
             new(TournTeamManage, "Administrar equipos y enrolamiento de jugadores", "TORNEOS", new[] { SuperAdminId, EncargadoId }),
             new(TournFixture, "Generar fixture y programar encuentros", "TORNEOS", new[] { SuperAdminId, EncargadoId }),
             new(TournMatchControl, "Control de mesa: registro de eventos y actas", "TORNEOS", new[] { SuperAdminId, EncargadoId }),
+            new(TournMatchWidgets, "Widgets de transmisión: tableros y tiempos en vivo", "TORNEOS", new[] { SuperAdminId, AdminId, EncargadoId }),
          };
 
         // --- 4. CONSTANTES DE STRINGS (Para usar en [Authorize(Policy = ...)]) ---
@@ -81,6 +82,10 @@ namespace Siged.Domain.Entities.Security
         public const string TournTeamManage = "tourn.team.manage";    // Inscribir Equipos y Jugadores (Encargado)
         public const string TournFixture = "tourn.fixture";          // Programar fechas, horas y sedes (Encargado/Mesa)
         public const string TournMatchControl = "tourn.match.control"; // Registrar goles, tarjetas y finalizar (Mesa)
+        /// <summary>Configurar plantillas de vitrina (tableros deportivos / tiempos) durante la transmisión.</summary>
+        public const string TournMatchWidgets = "tourn.match.widgets";
+        /// <summary>Política compuesta: mesa o operador de gráficos puede guardar el JSON del widget.</summary>
+        public const string TournMesaBroadcast = "tourn.mesa.broadcast";
         // CATEGORÍA: NOTICIAS
         public const string NewsView = "news.view";          // Ver el panel de gestión
         public const string NewsCreate = "news.create";      // Crear borradores

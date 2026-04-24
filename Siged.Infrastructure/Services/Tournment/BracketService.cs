@@ -25,6 +25,9 @@ namespace Siged.Infrastructure.Services.Tournment
                 .Include(p => p.Journals)
                     .ThenInclude(j => j.Matches)
                         .ThenInclude(m => m.VisitorTeam)
+                .Include(p => p.Journals)
+                    .ThenInclude(j => j.Matches)
+                        .ThenInclude(m => m.Venue)
                 .FirstOrDefaultAsync(p => p.Id == phaseId);
 
             if (phase == null) return new BracketDto();
@@ -52,7 +55,9 @@ namespace Siged.Infrastructure.Services.Tournment
                                 VisitorPenaltyScore = m.VisitorPenaltyScore,
                                 WinnerId = m.WinnerId,
                                 Status = m.Status.ToString(),
-                                Note = m.Note
+                                Note = m.Note,
+                                ScheduledAt = m.ScheduledAt == default ? null : m.ScheduledAt,
+                                VenueName = m.Venue?.Name
                             }).ToList()
                     }).ToList()
             };

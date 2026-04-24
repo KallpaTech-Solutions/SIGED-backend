@@ -126,6 +126,13 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 .FirstOrDefaultAsync(c => c.Id == id);
 
             if (comp == null) return NotFound();
+
+            var formatSetup = await _context.CompetitionRules
+                .AsNoTracking()
+                .Where(r => r.CompetitionId == id && r.RuleKey.StartsWith("FORMAT_SETUP_"))
+                .ToDictionaryAsync(r => r.RuleKey, r => r.RuleValue ?? "");
+            comp.FormatSetup = formatSetup.Count > 0 ? formatSetup : null;
+
             return Ok(comp);
         }
 

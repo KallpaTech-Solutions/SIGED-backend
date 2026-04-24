@@ -1,4 +1,7 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 using Siged.Domain.Entities.Core.Tournaments.Enums;
 
 namespace Siged.Domain.Entities.Core.Tournaments
@@ -23,6 +26,11 @@ namespace Siged.Domain.Entities.Core.Tournaments
 
         // Una competición tiene sus propias fases y partidos
         public virtual ICollection<Phase> Phases { get; set; } = new List<Phase>();
+
+        /// <summary>Solo salida JSON (GET): opciones usadas al generar el formato inicial.</summary>
+        [NotMapped]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public Dictionary<string, string>? FormatSetup { get; set; }
 
     }
 }

@@ -27,19 +27,15 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
         // --- CREACIÓN ---
         [HttpPost]
-        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
         public async Task<IActionResult> Create([FromForm] CreatePlayerDto dto)
         {
             var team = await _context.Teams.AsNoTracking().FirstOrDefaultAsync(t => t.Id == dto.TeamId);
             if (team == null)
                 return BadRequest("El equipo especificado no existe.");
 
-            if (!TournDelegateAuth.IsTournamentAdmin(User))
-            {
-                var myOrg = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
-                if (myOrg == null || team.OrganizacionId != myOrg.Value)
-                    return Forbid();
-            }
+            if (!await TeamManagementAuthorization.CanManageTeamAsync(User, _context, dto.TeamId))
+                return Forbid();
 
             if (await _context.Players.AnyAsync(p => p.Dni == dto.Dni))
                 return BadRequest("Ese código de identificación ya está registrado.");
@@ -69,7 +65,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
         // --- ACTUALIZACIÓN ---
         [HttpPut("{id}")]
-        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
         public async Task<IActionResult> Update(Guid id, [FromForm] CreatePlayerDto dto)
         {
             var player = await _context.Players
@@ -77,12 +73,8 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 .FirstOrDefaultAsync(p => p.Id == id);
             if (player == null) return NotFound();
 
-            if (!TournDelegateAuth.IsTournamentAdmin(User))
-            {
-                var myOrg = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
-                if (myOrg == null || player.Team.OrganizacionId != myOrg.Value)
-                    return Forbid();
-            }
+            if (!await TeamManagementAuthorization.CanManageTeamAsync(User, _context, player.TeamId))
+                return Forbid();
 
             if (await _context.Players.AnyAsync(p => p.Dni == dto.Dni && p.Id != id))
                 return BadRequest("Ese código de identificación ya está registrado.");
@@ -113,7 +105,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         // --- ELIMINACIÓN / ESTADO ---
         /// <summary>Activa o desactiva un jugador. Delegados solo sobre planteles de su escuela; administración de torneo sin esa restricción.</summary>
         [HttpPatch("{id}/status")]
-        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
         public async Task<IActionResult> ToggleStatus(Guid id)
         {
             var player = await _context.Players
@@ -121,12 +113,8 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 .FirstOrDefaultAsync(p => p.Id == id);
             if (player == null) return NotFound();
 
-            if (!TournDelegateAuth.IsTournamentAdmin(User))
-            {
-                var myOrg = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
-                if (myOrg == null || player.Team.OrganizacionId != myOrg.Value)
-                    return Forbid();
-            }
+            if (!await TeamManagementAuthorization.CanManageTeamAsync(User, _context, player.TeamId))
+                return Forbid();
 
             player.IsActive = !player.IsActive;
             await _context.SaveChangesAsync();

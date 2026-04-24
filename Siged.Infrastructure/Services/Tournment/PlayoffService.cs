@@ -1,4 +1,7 @@
-﻿using Siged.Application.DTOs.Tournaments.Playoff;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using Siged.Application.DTOs.Tournaments.Playoff;
 using Siged.Domain.Entities.Core.Tournaments;
 using Siged.Domain.Entities.Core.Tournaments.Enums;
 using Siged.Infrastructure.Persistence;
@@ -19,15 +22,27 @@ namespace Siged.Infrastructure.Services.Tournment
 
         public async Task GenerateKnockoutFromGroups(GeneratePlayoffDto dto)
         {
-            // 1. Obtener los grupos de la fase anterior
+            var sourcePhase = await _context.Phases
+                .FirstOrDefaultAsync(p => p.Id == dto.SourcePhaseId && p.CompetitionId == dto.CompetitionId)
+                ?? throw new InvalidOperationException("Fase origen no encontrada o no pertenece a esta competencia.");
+
+            if (sourcePhase.IsDirectElimination)
+                throw new InvalidOperationException("La fase origen debe ser de grupos (no eliminatoria).");
+
+            if (await _context.Phases.AnyAsync(p => p.CompetitionId == dto.CompetitionId && p.IsDirectElimination))
+                throw new InvalidOperationException(
+                    "Ya existe una fase eliminatoria. Usá «Promover ganadores» para la siguiente ronda.");
+
             var groups = await _context.Groups
                 .Where(g => g.PhaseId == dto.SourcePhaseId)
                 .OrderBy(g => g.Name)
                 .ToListAsync();
 
+            if (groups.Count == 0)
+                throw new InvalidOperationException("La fase origen no tiene grupos.");
+
             var allQualified = new List<(Guid TeamId, int Rank, string GroupName)>();
 
-            // 2. Extraer los clasificados de cada grupo usando tu StandingsService
             foreach (var group in groups)
             {
                 var standings = await _standingsService.GetStandingsByGroupAsync(group.Id);
@@ -39,48 +54,136 @@ namespace Siged.Infrastructure.Services.Tournment
                 }
             }
 
-            // 3. Crear la nueva Fase de Eliminación Directa
+            if (allQualified.Count < 2)
+                throw new InvalidOperationException("Se necesitan al menos 2 clasificados para armar la eliminatoria.");
+
+            var qualifiedSet = allQualified.Select(q => q.TeamId).ToHashSet();
+
+            var nextOrder = await _context.Phases
+                .Where(p => p.CompetitionId == dto.CompetitionId)
+                .Select(p => (int?)p.Order)
+                .MaxAsync() ?? 0;
+
+            var competition = await _context.Competitions.FindAsync(dto.CompetitionId)
+                ?? throw new InvalidOperationException("Competición no encontrada.");
+
             var newPhase = new Phase
             {
                 CompetitionId = dto.CompetitionId,
                 Name = dto.NewPhaseName,
                 Type = PhaseType.EliminacionSimple,
                 IsDirectElimination = true,
-                Order = 2 // Suponiendo que la de grupos fue la 1
+                IsDoubleLeg = dto.IsDoubleLeg,
+                Order = nextOrder + 1
             };
             _context.Phases.Add(newPhase);
 
-            // Creamos un "Grupo" ficticio para contener los partidos de la llave
             var bracketGroup = new Group { Phase = newPhase, Name = "Llave Principal", QualifiedCount = 1 };
             _context.Groups.Add(bracketGroup);
 
             await _context.SaveChangesAsync();
 
-            // 4. Lógica de Cruce (1ero A vs 2do B, 1ero B vs 2do A...)
-            var journal = new Journal { GroupId = bracketGroup.Id, Name = "Partidos de " + dto.NewPhaseName, Sequence = 1 };
+            var journal = new Journal
+            {
+                GroupId = bracketGroup.Id,
+                PhaseId = newPhase.Id,
+                Name = "Partidos de " + dto.NewPhaseName,
+                Sequence = 1,
+                IsActive = true,
+                ScheduledDate = DateTime.UtcNow
+            };
             _context.Journals.Add(journal);
 
-            for (int i = 0; i < allQualified.Count / 2; i++)
-            {
-                // Cruce simple: El primero de una lista con el último de la lista invertida
-                // Esto funciona bien si tienes 2 grupos (1A vs 2B y 1B vs 2A)
-                var local = allQualified[i];
-                var visitor = allQualified[allQualified.Count - 1 - i];
+            List<(Guid LocalTeamId, Guid VisitorTeamId)> pairings;
 
-                var match = new Match
+            var manual = dto.ManualPairings?.Where(p => p.LocalTeamId != Guid.Empty && p.VisitorTeamId != Guid.Empty).ToList();
+            if (manual is { Count: > 0 })
+            {
+                if (allQualified.Count % 2 == 1)
+                    throw new InvalidOperationException(
+                        "Con cantidad impar de clasificados no se pueden definir solo cruces manuales pareados; usá automático (incluye tanda libre) o ajustá cupos por grupo.");
+
+                ValidateManualPairings(manual, qualifiedSet, allQualified.Count);
+                pairings = manual.Select(p => (p.LocalTeamId, p.VisitorTeamId)).ToList();
+            }
+            else
+            {
+                pairings = new List<(Guid, Guid)>();
+                var n = allQualified.Count;
+                for (int i = 0; i < n / 2; i++)
+                {
+                    var local = allQualified[i].TeamId;
+                    var visitor = allQualified[n - 1 - i].TeamId;
+                    pairings.Add((local, visitor));
+                }
+            }
+
+            foreach (var (localId, visitorId) in pairings)
+            {
+                _context.Matches.Add(new Match
                 {
                     Journal = journal,
-                    LocalTeamId = local.TeamId,
-                    VisitorTeamId = visitor.TeamId,
+                    LocalTeamId = localId,
+                    VisitorTeamId = visitorId,
                     Status = MatchStatus.Programado,
                     GroupId = bracketGroup.Id,
                     PhaseId = newPhase.Id,
-                    DisciplineId = (await _context.Competitions.FindAsync(dto.CompetitionId))!.DisciplineId
-                };
-                _context.Matches.Add(match);
+                    DisciplineId = competition.DisciplineId,
+                    CreatedAt = DateTime.UtcNow,
+                    IsActive = true
+                });
+            }
+
+            if (allQualified.Count % 2 == 1 && (manual == null || manual.Count == 0))
+            {
+                var paired = pairings.SelectMany(p => new[] { p.LocalTeamId, p.VisitorTeamId }).ToHashSet();
+                var byeTeam = allQualified.Select(q => q.TeamId).First(id => !paired.Contains(id));
+                _context.Matches.Add(new Match
+                {
+                    Journal = journal,
+                    LocalTeamId = byeTeam,
+                    VisitorTeamId = null,
+                    Status = MatchStatus.Finalizado,
+                    WinnerId = byeTeam,
+                    LocalScore = 1,
+                    VisitorScore = 0,
+                    Note = "Pasa libre (clasificado impar en cruces automáticos)",
+                    GroupId = bracketGroup.Id,
+                    PhaseId = newPhase.Id,
+                    DisciplineId = competition.DisciplineId,
+                    CreatedAt = DateTime.UtcNow,
+                    IsActive = true
+                });
             }
 
             await _context.SaveChangesAsync();
+        }
+
+        private static void ValidateManualPairings(
+            List<PlayoffManualPairingDto> manual,
+            HashSet<Guid> qualifiedSet,
+            int totalQualified)
+        {
+            foreach (var p in manual)
+            {
+                if (p.LocalTeamId == p.VisitorTeamId)
+                    throw new InvalidOperationException("Un partido no puede tener el mismo equipo como local y visitante.");
+
+                if (!qualifiedSet.Contains(p.LocalTeamId) || !qualifiedSet.Contains(p.VisitorTeamId))
+                    throw new InvalidOperationException(
+                        "Los cruces manuales solo pueden incluir equipos clasificados según la tabla actual.");
+            }
+
+            var used = new HashSet<Guid>();
+            foreach (var p in manual)
+            {
+                if (!used.Add(p.LocalTeamId) || !used.Add(p.VisitorTeamId))
+                    throw new InvalidOperationException("Cada clasificado solo puede aparecer en un cruce.");
+            }
+
+            if (used.Count != totalQualified)
+                throw new InvalidOperationException(
+                    $"Debés armar cruces para todos los clasificados ({totalQualified} equipos en {manual.Count} partidos).");
         }
 
         public async Task PromoteWinnersToNextPhase(PromoteWinnersDto dto)
@@ -100,14 +203,21 @@ namespace Siged.Infrastructure.Services.Tournment
                 throw new Exception("No hay suficientes ganadores para generar la siguiente ronda.");
 
             // 2. Crear la siguiente Fase (Ej. Semifinal)
-            var currentPhase = await _context.Phases.FindAsync(dto.CurrentPhaseId);
+            var currentPhase = await _context.Phases.FindAsync(dto.CurrentPhaseId)
+                ?? throw new InvalidOperationException("Fase actual no encontrada.");
+
+            var maxOrder = await _context.Phases
+                .Where(p => p.CompetitionId == dto.CompetitionId)
+                .Select(p => (int?)p.Order)
+                .MaxAsync() ?? 0;
+
             var nextPhase = new Phase
             {
                 CompetitionId = dto.CompetitionId,
                 Name = dto.NextPhaseName,
                 Type = PhaseType.EliminacionSimple,
                 IsDirectElimination = true,
-                Order = (currentPhase?.Order ?? 1) + 1
+                Order = maxOrder + 1
             };
             _context.Phases.Add(nextPhase);
 

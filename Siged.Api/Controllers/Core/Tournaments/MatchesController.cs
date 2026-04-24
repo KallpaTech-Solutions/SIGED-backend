@@ -1,8 +1,8 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using Siged.Domain.Constants;
 using Siged.Api.Hubs;
 using Siged.Api.Services;
 using Siged.Application.DTOs.Tournaments.Match;
@@ -24,17 +24,60 @@ namespace Siged.Api.Controllers.Core.Tournaments
         private readonly IHubContext<TournamentHub> _hubContext;
         private readonly StandingsService _standingsService;
         private readonly TournamentVitrinaBroadcastService _vitrina;
+        private readonly MatchSportRulesBuilder _sportRulesBuilder;
+        private readonly MatchBroadcastWidgetStore _broadcastWidgetStore;
 
         public MatchesController(
             ApplicationDbContext context,
             IHubContext<TournamentHub> hubContext,
             StandingsService standingsService,
-            TournamentVitrinaBroadcastService vitrina)
+            TournamentVitrinaBroadcastService vitrina,
+            MatchSportRulesBuilder sportRulesBuilder,
+            MatchBroadcastWidgetStore broadcastWidgetStore)
         {
             _context = context;
             _hubContext = hubContext;
             _standingsService = standingsService;
             _vitrina = vitrina;
+            _sportRulesBuilder = sportRulesBuilder;
+            _broadcastWidgetStore = broadcastWidgetStore;
+        }
+
+        private async Task<bool> PlayersBelongToTeamAsync(Guid teamId, Guid? playerId, Guid? relatedPlayerId)
+        {
+            foreach (var pid in new[] { playerId, relatedPlayerId })
+            {
+                if (!pid.HasValue) continue;
+                var ok = await _context.Players.AsNoTracking()
+                    .AnyAsync(p => p.Id == pid.Value && p.TeamId == teamId);
+                if (!ok) return false;
+            }
+
+            return true;
+        }
+
+        private async Task PushBroadcastAfterActaAsync(Guid matchId, Match match, object? lastEvent = null)
+        {
+            var widgetCur = _broadcastWidgetStore.GetSnapshotJson(matchId);
+            var widgetMerged = await MatchBroadcastWidgetActaSync.MergeAfterActaChangeAsync(_context, matchId, match, widgetCur);
+            using (var wDoc = JsonDocument.Parse(widgetMerged))
+            {
+                _broadcastWidgetStore.TrySetSnapshot(matchId, wDoc.RootElement, out _);
+            }
+
+            var broadcastSnapshot = _broadcastWidgetStore.GetSnapshotJson(matchId);
+            await _hubContext.Clients.Group(MatchRoomGroup(matchId)).SendAsync("ReceiveMatchUpdate", new
+            {
+                matchId,
+                status = match.Status.ToString(),
+                localScore = match.LocalScore,
+                visitorScore = match.VisitorScore,
+                clockAccumulatedSeconds = match.ClockAccumulatedSeconds,
+                clockPeriodAnchorUtc = match.ClockPeriodAnchorUtc,
+                clockWidgetKind = match.ClockWidgetKind.ToString(),
+                broadcastWidgetJson = broadcastSnapshot,
+                lastEvent = lastEvent ?? new { type = "ACTA_UPDATED", message = "Eventos del acta actualizados." }
+            });
         }
 
         /// <summary>
@@ -156,10 +199,23 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
         /// <summary>
         /// Vitrina pública: marcador, contexto (torneo/competencia) y cronología de eventos.
+        /// Solo partidos activos (<see cref="Match.IsActive"/>).
         /// </summary>
         [HttpGet("public/{id:guid}/detail")]
         [AllowAnonymous]
-        public async Task<IActionResult> GetPublicMatchDetail(Guid id)
+        public Task<IActionResult> GetPublicMatchDetail(Guid id) =>
+            BuildMatchDetailResponseAsync(id, requireActive: true);
+
+        /// <summary>
+        /// Misma carga que la vista pública, sin filtrar por <see cref="Match.IsActive"/>:
+        /// la mesa debe ver el partido aunque el flag o datos de vitrina fallen, y evita 404 al transmitir.
+        /// </summary>
+        [HttpGet("{id:guid}/mesa-detail")]
+        [Authorize(Policy = "tourn.mesa.detail")]
+        public Task<IActionResult> GetMatchDetailForMesa(Guid id) =>
+            BuildMatchDetailResponseAsync(id, requireActive: false);
+
+        private async Task<IActionResult> BuildMatchDetailResponseAsync(Guid id, bool requireActive)
         {
             var match = await _context.Matches
                 .AsNoTracking()
@@ -174,11 +230,12 @@ namespace Siged.Api.Controllers.Core.Tournaments
                         .ThenInclude(c => c.Discipline)
                             .ThenInclude(d => d.Rules)
                 .Include(m => m.Venue)
-                .FirstOrDefaultAsync(m => m.Id == id && m.IsActive);
+                .FirstOrDefaultAsync(m => m.Id == id && (!requireActive || m.IsActive));
 
             if (match == null) return NotFound();
 
-            if (match.LocalTeam == null || match.VisitorTeam == null)
+            // Vitrina pública: solo partidos con ambos equipos. Mesa: permite slots sin rival aún (llaves / fixture TBD).
+            if (requireActive && (match.LocalTeam == null || match.VisitorTeam == null))
                 return NotFound("Partido sin equipos asignados.");
 
             if (match.Phase?.Competition == null)
@@ -189,48 +246,21 @@ namespace Siged.Api.Controllers.Core.Tournaments
             if (tournament == null)
                 return NotFound("Torneo no disponible para este partido.");
 
-            var sportRules = new Dictionary<string, string>();
-            if (comp.Discipline?.Rules != null)
-            {
-                foreach (var r in comp.Discipline.Rules)
-                {
-                    if (string.IsNullOrWhiteSpace(r.RuleKey)) continue;
-                    sportRules[r.RuleKey] = r.RuleValue ?? "";
-                }
-            }
-
-            var competitionRuleRows = await _context.CompetitionRules
-                .AsNoTracking()
-                .Where(r => r.CompetitionId == comp.Id)
-                .ToListAsync();
-            foreach (var r in competitionRuleRows)
-            {
-                if (string.IsNullOrWhiteSpace(r.RuleKey)) continue;
-                sportRules[r.RuleKey] = r.RuleValue ?? "";
-            }
-
-            // Completar reglas típicas (PERIOD_DURATION, etc.) desde la plantilla oficial si faltan en BD.
-            var tkRules = comp.Discipline?.TemplateKey;
-            if (!string.IsNullOrWhiteSpace(tkRules))
-            {
-                foreach (var kv in SportRulesTemplates.OfficialTemplates)
-                {
-                    if (!string.Equals(kv.Key, tkRules, StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    foreach (var rule in kv.Value.Rules)
-                    {
-                        if (!sportRules.ContainsKey(rule.Key))
-                            sportRules[rule.Key] = rule.Value;
-                    }
-                    break;
-                }
-            }
+            var sportRules = await _sportRulesBuilder.BuildMapAsync(
+                comp.Id,
+                comp.Discipline?.Rules,
+                comp.Discipline?.TemplateKey);
 
             await RepairEnVivoKickoffAsync(id, match.Status, match.LocalTeamId);
+            await EnsureLiveClockAnchorForDetailAsync(id, match.Status, match.LocalTeamId);
+
+            var clockRow = await _context.Matches.AsNoTracking()
+                .Where(m => m.Id == id)
+                .Select(m => new { m.ClockAccumulatedSeconds, m.ClockPeriodAnchorUtc })
+                .FirstOrDefaultAsync();
 
             var events = await _context.MatchEvents
                 .AsNoTracking()
-                .Include(e => e.Player)
                 .Where(e => e.MatchId == id)
                 .OrderBy(e => e.OccurredAt == null ? 1 : 0)
                 .ThenBy(e => e.OccurredAt)
@@ -242,8 +272,12 @@ namespace Siged.Api.Controllers.Core.Tournaments
                     Id = e.Id,
                     Minute = e.Minute,
                     Type = e.Type.ToString(),
+                    TeamId = e.TeamId,
                     TeamName = _context.Teams.Where(t => t.Id == e.TeamId).Select(t => t.Name).FirstOrDefault() ?? "Equipo",
+                    PlayerId = e.PlayerId,
                     PlayerName = e.Player != null ? e.Player.Name : null,
+                    RelatedPlayerId = e.RelatedPlayerId,
+                    RelatedPlayerName = e.RelatedPlayer != null ? e.RelatedPlayer.Name : null,
                     Note = e.Note,
                     Value = e.Value,
                     Period = e.Period,
@@ -265,10 +299,10 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 match.VisitorScore,
                 match.LocalTeamId,
                 match.VisitorTeamId,
-                LocalTeamName = match.LocalTeam.Name,
-                LocalTeamLogo = match.LocalTeam.LogoUrl,
-                VisitorTeamName = match.VisitorTeam.Name,
-                VisitorTeamLogo = match.VisitorTeam.LogoUrl,
+                LocalTeamName = match.LocalTeam?.Name ?? "Por asignar",
+                LocalTeamLogo = match.LocalTeam?.LogoUrl,
+                VisitorTeamName = match.VisitorTeam?.Name ?? "Por asignar",
+                VisitorTeamLogo = match.VisitorTeam?.LogoUrl,
                 DisciplineName = match.Discipline?.Name ?? disciplineTitle,
                 PhaseName = match.Phase.Name,
                 Gender = comp.Gender.ToString(),
@@ -283,6 +317,10 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 SportRules = sportRules,
                 match.VenueId,
                 VenueName = match.Venue != null ? match.Venue.Name : null,
+                ClockAccumulatedSeconds = clockRow?.ClockAccumulatedSeconds ?? match.ClockAccumulatedSeconds,
+                ClockPeriodAnchorUtc = clockRow?.ClockPeriodAnchorUtc ?? match.ClockPeriodAnchorUtc,
+                ClockWidgetKind = match.ClockWidgetKind.ToString(),
+                BroadcastWidgetJson = _broadcastWidgetStore.GetSnapshotJson(id),
                 Events = events
             });
         }
@@ -315,11 +353,11 @@ namespace Siged.Api.Controllers.Core.Tournaments
             var result = new MatchDetailDto
             {
                 Id = match.Id,
-                LocalTeamName = match.LocalTeam.Name,
-                LocalTeamLogo = match.LocalTeam.LogoUrl,
+                LocalTeamName = match.LocalTeam?.Name ?? "—",
+                LocalTeamLogo = match.LocalTeam?.LogoUrl,
                 LocalScore = match.LocalScore,
-                VisitorTeamName = match.VisitorTeam.Name,
-                VisitorTeamLogo = match.VisitorTeam.LogoUrl,
+                VisitorTeamName = match.VisitorTeam?.Name ?? "—",
+                VisitorTeamLogo = match.VisitorTeam?.LogoUrl,
                 VisitorScore = match.VisitorScore,
                 Status = match.Status.ToString(),
                 ScheduledAt = match.ScheduledAt
@@ -331,7 +369,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         public async Task<IActionResult> GetMatchTimeline(Guid id)
         {
             var events = await _context.MatchEvents
-                .Include(e => e.Player)
+                .AsNoTracking()
                 .Where(e => e.MatchId == id)
                 .OrderBy(e => e.OccurredAt == null ? 1 : 0)
                 .ThenByDescending(e => e.OccurredAt)
@@ -342,8 +380,12 @@ namespace Siged.Api.Controllers.Core.Tournaments
                     Id = e.Id,
                     Minute = e.Minute,
                     Type = e.Type.ToString(),
+                    TeamId = e.TeamId,
                     TeamName = _context.Teams.Where(t => t.Id == e.TeamId).Select(t => t.Name).FirstOrDefault() ?? "Equipo",
+                    PlayerId = e.PlayerId,
                     PlayerName = e.Player != null ? e.Player.Name : null,
+                    RelatedPlayerId = e.RelatedPlayerId,
+                    RelatedPlayerName = e.RelatedPlayer != null ? e.RelatedPlayer.Name : null,
                     Note = e.Note,
                     Value = e.Value,
                     Period = e.Period,
@@ -375,9 +417,15 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 });
             }
 
+            var previousStatus = match.Status;
+
+            // La transmisión (En vivo / Programado / Suspendido) no congela el cronómetro: eso es PATCH /clock.
+
             match.Status = dto.Status;
 
             // Primer arranque en vivo: registrar inicio del 1.º periodo para el cronómetro (TeamId = local).
+            // El cronómetro del cliente usa OccurredAt del InicioPeriodo, no ScheduledAt: si el inicio ya existía
+            // con fecha vieja u otro día, al entrar en vivo hay que alinearlo al momento real del clic (salvo reanudar el mismo día).
             if (dto.Status == MatchStatus.EnVivo && match.LocalTeamId.HasValue)
             {
                 var yaHayInicio = await _context.MatchEvents
@@ -395,15 +443,24 @@ namespace Siged.Api.Controllers.Core.Tournaments
                         Value = 0
                     });
                 }
+                else if (previousStatus != MatchStatus.EnVivo)
+                {
+                    await AlignKickoffOccurredAtOnGoLiveAsync(match.Id);
+                }
+            }
+
+            if (dto.Status == MatchStatus.EnVivo
+                && previousStatus != MatchStatus.EnVivo
+                && match.ClockPeriodAnchorUtc == null)
+            {
+                match.ClockPeriodAnchorUtc = DateTime.UtcNow;
             }
 
             await _context.SaveChangesAsync();
 
-            if (dto.Status == MatchStatus.EnVivo)
-            {
-                await _hubContext.Clients.Group(match.Id.ToString().ToLowerInvariant())
-                    .SendAsync("ReceiveMatchUpdate", new { matchId = match.Id });
-            }
+            // Cualquier cambio de estado (En vivo, pausa de transmisión, etc.): mismo snapshot para mesa y público.
+            await _hubContext.Clients.Group(MatchRoomGroup(match.Id))
+                .SendAsync("ReceiveMatchUpdate", HubMatchSnapshot(match));
 
             await _vitrina.NotifyLandingRefreshAsync();
             return Ok(match);
@@ -441,6 +498,20 @@ namespace Siged.Api.Controllers.Core.Tournaments
             var match = await _context.Matches.FindAsync(id);
             if (match == null) return NotFound("Partido no encontrado");
 
+            if (dto.TeamId != match.LocalTeamId && dto.TeamId != match.VisitorTeamId)
+                return BadRequest("El TeamId no pertenece a este partido.");
+
+            if (dto.Type == MatchEventType.Sustitucion)
+            {
+                if (!await PlayersBelongToTeamAsync(dto.TeamId, dto.PlayerId, dto.RelatedPlayerId))
+                    return BadRequest("En sustitución, ambos jugadores deben pertenecer al equipo elegido.");
+            }
+            else if (dto.PlayerId.HasValue)
+            {
+                if (!await PlayersBelongToTeamAsync(dto.TeamId, dto.PlayerId, null))
+                    return BadRequest("El jugador debe pertenecer al equipo del evento.");
+            }
+
             // ⚽ 1. Lógica de Marcador ÚNICA y VALIDADA
             if (dto.Type == MatchEventType.Goal || dto.Type == MatchEventType.Puntaje)
             {
@@ -457,6 +528,17 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 else if (match.VisitorTeamId == dto.TeamId) match.VisitorPenaltyScore += 1;
             }
 
+            if (dto.Type == MatchEventType.FinPeriodo)
+            {
+                match.ClockAccumulatedSeconds = 0;
+                match.ClockPeriodAnchorUtc = null;
+            }
+            else if (dto.Type == MatchEventType.InicioPeriodo)
+            {
+                match.ClockAccumulatedSeconds = 0;
+                match.ClockPeriodAnchorUtc = match.Status == MatchStatus.EnVivo ? DateTime.UtcNow : null;
+            }
+
             // 2. Creamos el evento
             var newEvent = new MatchEvent
             {
@@ -465,6 +547,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 Type = dto.Type,
                 TeamId = dto.TeamId,
                 PlayerId = dto.PlayerId,
+                RelatedPlayerId = dto.RelatedPlayerId,
                 Note = dto.Note,
                 Value = dto.Value,
                 Period = dto.Period,
@@ -476,19 +559,12 @@ namespace Siged.Api.Controllers.Core.Tournaments
             // 💾 GUARDADO CRÍTICO: Aquí se guarda el evento Y el nuevo score del partido
             await _context.SaveChangesAsync();
 
-            // 🚀 3. SignalR: Enviamos al grupo en minúsculas
-            await _hubContext.Clients.Group(id.ToString().ToLower()).SendAsync("ReceiveMatchUpdate", new
+            await PushBroadcastAfterActaAsync(id, match, new
             {
-                matchId = id,
-                localScore = match.LocalScore,
-                visitorScore = match.VisitorScore,
-                lastEvent = new
-                {
-                    minute = dto.Minute,
-                    type = dto.Type.ToString(),
-                    teamId = dto.TeamId,
-                    note = dto.Note
-                }
+                minute = dto.Minute,
+                type = dto.Type.ToString(),
+                teamId = dto.TeamId,
+                note = dto.Note
             });
 
             return Ok(new { message = "Evento y marcador actualizados", score = $"{match.LocalScore}-{match.VisitorScore}" });
@@ -530,8 +606,61 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 message = $"¡Autor confirmado! Gol de {playerName}"
             });
 
+            await PushBroadcastAfterActaAsync(matchEvent.MatchId, matchEvent.Match);
+
             return Ok(new { message = "Jugador actualizado", playerName });
         }
+
+        /// <summary>
+        /// Corregir jugador/es o nota de un evento (campos enviados en el JSON; omitir una clave para no cambiarla).
+        /// </summary>
+        [HttpPatch("events/{eventId}")]
+        [Authorize(Policy = Permissions.TournMatchControl)]
+        public async Task<IActionResult> PatchEvent(Guid eventId, [FromBody] JsonElement body)
+        {
+            var matchEvent = await _context.MatchEvents
+                .Include(e => e.Match)
+                .FirstOrDefaultAsync(e => e.Id == eventId);
+
+            if (matchEvent == null) return NotFound("Evento no encontrado.");
+            if (body.ValueKind != JsonValueKind.Object) return BadRequest("Cuerpo inválido.");
+
+            if (body.TryGetProperty("playerId", out var jp))
+            {
+                matchEvent.PlayerId = jp.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
+                    ? null
+                    : jp.GetGuid();
+            }
+
+            if (body.TryGetProperty("relatedPlayerId", out var jr))
+            {
+                matchEvent.RelatedPlayerId = jr.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
+                    ? null
+                    : jr.GetGuid();
+            }
+
+            if (body.TryGetProperty("note", out var jn))
+                matchEvent.Note = jn.ValueKind == JsonValueKind.Null ? null : jn.GetString();
+
+            if (matchEvent.Type != MatchEventType.Sustitucion && matchEvent.RelatedPlayerId.HasValue)
+                return BadRequest("RelatedPlayerId solo aplica a eventos de sustitución.");
+
+            if (matchEvent.Type == MatchEventType.Sustitucion)
+            {
+                if (!await PlayersBelongToTeamAsync(matchEvent.TeamId, matchEvent.PlayerId, matchEvent.RelatedPlayerId))
+                    return BadRequest("Los jugadores deben pertenecer al equipo del evento.");
+            }
+            else if (matchEvent.PlayerId.HasValue
+                     && !await PlayersBelongToTeamAsync(matchEvent.TeamId, matchEvent.PlayerId, null))
+            {
+                return BadRequest("El jugador debe pertenecer al equipo del evento.");
+            }
+
+            await _context.SaveChangesAsync();
+            await PushBroadcastAfterActaAsync(matchEvent.MatchId, matchEvent.Match);
+            return Ok(new { message = "Evento actualizado" });
+        }
+
         [HttpDelete("events/{eventId}")]
         [Authorize(Policy = Permissions.TournMatchControl)]
         public async Task<IActionResult> DeleteEvent(Guid eventId)
@@ -562,18 +691,11 @@ namespace Siged.Api.Controllers.Core.Tournaments
             _context.MatchEvents.Remove(matchEvent);
             await _context.SaveChangesAsync();
 
-            // 🚀 4. SignalR: Notificar a todos que el marcador cambió (hacia abajo)
-            await _hubContext.Clients.Group(match.Id.ToString().ToLower()).SendAsync("ReceiveMatchUpdate", new
+            await PushBroadcastAfterActaAsync(match.Id, match, new
             {
-                matchId = match.Id,
-                localScore = match.LocalScore,
-                visitorScore = match.VisitorScore,
-                lastEvent = new
-                {
-                    type = "EVENT_DELETED",
-                    message = "Un evento fue anulado. El marcador se ha actualizado.",
-                    deletedEventId = eventId
-                }
+                type = "EVENT_DELETED",
+                message = "Un evento fue anulado. El marcador se ha actualizado.",
+                deletedEventId = eventId
             });
 
             return Ok(new { message = "Evento eliminado y marcador corregido", localScore = match.LocalScore, visitorScore = match.VisitorScore });
@@ -593,6 +715,9 @@ namespace Siged.Api.Controllers.Core.Tournaments
             if (match == null) return NotFound("El partido no existe.");
             if (match.Status == MatchStatus.Finalizado)
                 return BadRequest("El partido ya fue finalizado previamente.");
+
+            if (match.Status == MatchStatus.EnVivo)
+                MatchChronometerShared.FlushRunningClockSegment(match);
 
             using var transaction = await _context.Database.BeginTransactionAsync();
 
@@ -625,30 +750,38 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
                 // 🚀 DETECCIÓN AUTOMÁTICA DE CAMPEÓN
                 // Comprobamos si el nombre de la fase contiene "FINAL" (puedes usar el Order también)
-                bool isGrandFinal = match.Phase.Name.Contains("FINAL", StringComparison.OrdinalIgnoreCase);
+                var phase = match.Phase;
+                bool isGrandFinal = phase?.Name.Contains("FINAL", StringComparison.OrdinalIgnoreCase) == true;
 
-                if (isGrandFinal && match.WinnerId.HasValue)
+                if (isGrandFinal && match.WinnerId.HasValue && phase != null)
                 {
                     var champion = match.WinnerId == match.LocalTeamId ? match.LocalTeam : match.VisitorTeam;
-
-                    // Emitimos un evento especial para TODO el Hub o la Competición
-                    await _hubContext.Clients.All.SendAsync("ReceiveChampion", new
+                    if (champion != null)
                     {
-                        competitionId = match.Phase.CompetitionId,
-                        championName = champion.Name,
-                        championLogo = champion.LogoUrl,
-                        score = $"{match.LocalScore} - {match.VisitorScore}",
-                        message = $"¡FELICIDADES {champion.Name}! CAMPEÓN DE LA {match.Phase.Name.ToUpper()}"
-                    });
+                        // Emitimos un evento especial para TODO el Hub o la Competición
+                        await _hubContext.Clients.All.SendAsync("ReceiveChampion", new
+                        {
+                            competitionId = phase.CompetitionId,
+                            championName = champion.Name,
+                            championLogo = champion.LogoUrl,
+                            score = $"{match.LocalScore} - {match.VisitorScore}",
+                            message = $"¡FELICIDADES {champion.Name}! CAMPEÓN DE LA {phase.Name.ToUpper()}"
+                        });
+                    }
                 }
 
                 // SignalR estándar de fin de partido
-                await _hubContext.Clients.Group(id.ToString().ToLower()).SendAsync("ReceiveMatchUpdate", new
+                await _hubContext.Clients.Group(MatchRoomGroup(id)).SendAsync("ReceiveMatchUpdate", new
                 {
                     matchId = id,
                     status = "Finalizado",
                     winnerId = match.WinnerId,
-                    finalScore = $"{match.LocalScore} - {match.VisitorScore}"
+                    finalScore = $"{match.LocalScore} - {match.VisitorScore}",
+                    localScore = match.LocalScore,
+                    visitorScore = match.VisitorScore,
+                    clockAccumulatedSeconds = match.ClockAccumulatedSeconds,
+                    clockPeriodAnchorUtc = match.ClockPeriodAnchorUtc,
+                    clockWidgetKind = match.ClockWidgetKind.ToString(),
                 });
 
                 await _vitrina.NotifyLandingRefreshAsync();
@@ -663,9 +796,170 @@ namespace Siged.Api.Controllers.Core.Tournaments
         }
 
         /// <summary>
+        /// Al pasar a En vivo desde otro estado: si el evento <see cref="MatchEventType.InicioPeriodo"/> activo tiene
+        /// <see cref="MatchEvent.OccurredAt"/> nulo o de otro día / muy antiguo, lo alinea a UTC actual
+        /// para que el cronómetro refleje el momento real del arranque (p. ej. programado 14:00 pero salió 14:03).
+        /// No toca reanudaciones el mismo día con marca reciente (pausa corta de transmisión).
+        /// </summary>
+        private static bool ShouldRefreshKickoffOccurredAt(DateTime? occurredAt, DateTime utcNow)
+        {
+            if (!occurredAt.HasValue) return true;
+            var o = occurredAt.Value;
+            if (o.Kind == DateTimeKind.Unspecified)
+                o = DateTime.SpecifyKind(o, DateTimeKind.Utc);
+            else if (o.Kind == DateTimeKind.Local)
+                o = o.ToUniversalTime();
+
+            if ((utcNow - o).TotalHours >= 20)
+                return true;
+            if (o.Date != utcNow.Date)
+                return true;
+            return false;
+        }
+
+        private async Task AlignKickoffOccurredAtOnGoLiveAsync(Guid matchId)
+        {
+            var marks = await _context.MatchEvents
+                .Where(e => e.MatchId == matchId &&
+                            (e.Type == MatchEventType.InicioPeriodo || e.Type == MatchEventType.FinPeriodo))
+                .OrderBy(e => e.OccurredAt.HasValue ? 0 : 1)
+                .ThenBy(e => e.OccurredAt)
+                .ThenBy(e => e.Id)
+                .ToListAsync();
+
+            int? activePeriod = null;
+            var inPlay = false;
+            MatchEvent? lastInicioForActive = null;
+
+            foreach (var ev in marks)
+            {
+                if (ev.Type == MatchEventType.InicioPeriodo)
+                {
+                    var p = MatchChronometerShared.NormInicioPeriod(ev);
+                    activePeriod = p;
+                    inPlay = true;
+                    lastInicioForActive = ev;
+                }
+                else if (ev.Type == MatchEventType.FinPeriodo)
+                {
+                    var pFin = ev.Period > 0 ? ev.Period : activePeriod ?? 1;
+                    if (activePeriod.HasValue && pFin == activePeriod.Value)
+                    {
+                        inPlay = false;
+                        lastInicioForActive = null;
+                    }
+                }
+            }
+
+            if (!inPlay || lastInicioForActive == null)
+                return;
+
+            var now = DateTime.UtcNow;
+            if (!ShouldRefreshKickoffOccurredAt(lastInicioForActive.OccurredAt, now))
+                return;
+
+            lastInicioForActive.OccurredAt = now;
+
+            var matchEntity = await _context.Matches.FirstOrDefaultAsync(m => m.Id == matchId);
+            if (matchEntity != null)
+            {
+                matchEntity.ClockAccumulatedSeconds = 0;
+                matchEntity.ClockPeriodAnchorUtc = now;
+            }
+        }
+
+        /// <summary>
         /// Partido en vivo sin marca de tiempo en el inicio de periodo: el cronómetro queda en 0:00.
         /// Crea el 1T si falta o asigna <see cref="MatchEvent.OccurredAt"/> al primer inicio que lo necesite.
         /// </summary>
+        /// <summary>
+        /// Partido en vivo en juego sin ancla de cronómetro (p. ej. activado antes del despliegue del reloj):
+        /// persiste <see cref="Match.ClockPeriodAnchorUtc"/> para que el cliente pueda calcular el transcurrido.
+        /// En descanso entre tiempos no asigna ancla.
+        /// </summary>
+        private async Task EnsureLiveClockAnchorForDetailAsync(Guid matchId, MatchStatus status, Guid? localTeamId)
+        {
+            if (status != MatchStatus.EnVivo || !localTeamId.HasValue)
+                return;
+
+            var tracked = await _context.Matches.FirstOrDefaultAsync(m => m.Id == matchId);
+            if (tracked == null || tracked.ClockPeriodAnchorUtc.HasValue)
+                return;
+
+            var marks = await _context.MatchEvents
+                .Where(e => e.MatchId == matchId &&
+                            (e.Type == MatchEventType.InicioPeriodo || e.Type == MatchEventType.FinPeriodo))
+                .OrderBy(e => e.OccurredAt.HasValue ? 0 : 1)
+                .ThenBy(e => e.OccurredAt)
+                .ThenBy(e => e.Id)
+                .ToListAsync();
+
+            int? activePeriod = null;
+            var inPlay = false;
+            MatchEvent? lastInicioForActive = null;
+
+            foreach (var ev in marks)
+            {
+                if (ev.Type == MatchEventType.InicioPeriodo)
+                {
+                    var p = MatchChronometerShared.NormInicioPeriod(ev);
+                    activePeriod = p;
+                    inPlay = true;
+                    lastInicioForActive = ev;
+                }
+                else if (ev.Type == MatchEventType.FinPeriodo)
+                {
+                    var pFin = ev.Period > 0 ? ev.Period : activePeriod ?? 1;
+                    if (activePeriod.HasValue && pFin == activePeriod.Value)
+                    {
+                        inPlay = false;
+                        lastInicioForActive = null;
+                    }
+                }
+            }
+
+            if (!inPlay || lastInicioForActive == null)
+                return;
+
+            if (tracked.ClockAccumulatedSeconds > 0)
+            {
+                tracked.ClockPeriodAnchorUtc = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+                return;
+            }
+
+            var kick = lastInicioForActive.OccurredAt;
+            if (kick.HasValue)
+            {
+                var k = kick.Value;
+                if (k.Kind == DateTimeKind.Unspecified)
+                    k = DateTime.SpecifyKind(k, DateTimeKind.Utc);
+                else if (k.Kind == DateTimeKind.Local)
+                    k = k.ToUniversalTime();
+                tracked.ClockPeriodAnchorUtc = k;
+            }
+            else
+            {
+                tracked.ClockPeriodAnchorUtc = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        /// <summary>Mismo criterio que <see cref="Hubs.TournamentHub.JoinMatchRoom"/>.</summary>
+        private static string MatchRoomGroup(Guid matchId) => matchId.ToString().ToLower();
+
+        private static object HubMatchSnapshot(Match m) => new
+        {
+            matchId = m.Id,
+            status = m.Status.ToString(),
+            localScore = m.LocalScore,
+            visitorScore = m.VisitorScore,
+            clockAccumulatedSeconds = m.ClockAccumulatedSeconds,
+            clockPeriodAnchorUtc = m.ClockPeriodAnchorUtc,
+            clockWidgetKind = m.ClockWidgetKind.ToString(),
+        };
+
         private async Task RepairEnVivoKickoffAsync(Guid matchId, MatchStatus status, Guid? localTeamId)
         {
             if (status != MatchStatus.EnVivo || !localTeamId.HasValue)

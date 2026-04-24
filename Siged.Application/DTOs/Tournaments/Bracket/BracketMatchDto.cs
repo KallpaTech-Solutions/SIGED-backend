@@ -18,5 +18,8 @@ namespace Siged.Application.DTOs.Tournaments.Bracket
         public Guid? WinnerId { get; set; }
         public string? Status { get; set; }
         public string? Note { get; set; }
+
+        public DateTime? ScheduledAt { get; set; }
+        public string? VenueName { get; set; }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Siged.Api.Authorization;
 using Siged.Api.Services;
 using Siged.Application.DTOs.Tournaments.Playoff;
 using Siged.Domain.Entities.Security;
@@ -42,7 +43,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         /// <param name="groupId"></param>
         /// <returns></returns>
         [HttpPost("generate-round-robin/{groupId}")]
-        [Authorize(Policy = Permissions.TournManage)]
+        [Authorize(Policy = TournFormatSetupAuth.PolicyName)]
         public async Task<IActionResult> Generate(Guid groupId)
         {
             // 1. Validar si el grupo existe y tiene equipos (No queremos fixture de 0 equipos)
@@ -72,7 +73,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         /// <param name="dto"></param>
         /// <returns></returns>
         [HttpPost("generate-playoffs")]
-        [Authorize(Policy = Permissions.TournManage)]
+        [Authorize(Policy = TournFormatSetupAuth.PolicyName)]
         public async Task<IActionResult> GeneratePlayoffs([FromBody] GeneratePlayoffDto dto)
         {
             try
@@ -92,12 +93,19 @@ namespace Siged.Api.Controllers.Core.Tournaments
         /// <param name="dto"></param>
         /// <returns></returns>
         [HttpPost("promote-winners")]
-        [Authorize(Policy = Permissions.TournManage)]
+        [Authorize(Policy = TournFormatSetupAuth.PolicyName)]
         public async Task<IActionResult> Promote([FromBody] PromoteWinnersDto dto)
         {
-            await _playoffService.PromoteWinnersToNextPhase(dto);
-            await _vitrina.NotifyLandingRefreshAsync();
-            return Ok(new { message = $"Se han generado los cruces para {dto.NextPhaseName}." });
+            try
+            {
+                await _playoffService.PromoteWinnersToNextPhase(dto);
+                await _vitrina.NotifyLandingRefreshAsync();
+                return Ok(new { message = $"Se han generado los cruces para {dto.NextPhaseName}." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
         }
 
         [HttpGet("phase/{phaseId}/bracket")]
@@ -108,7 +116,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
             return Ok(result);
         }
         [HttpPost("generate-direct-knockout")]
-        [Authorize(Policy = Permissions.TournManage)]
+        [Authorize(Policy = TournFormatSetupAuth.PolicyName)]
         public async Task<IActionResult> GenerateDirect([FromBody] GenerateDirectKnockoutDto dto)
         {
             try

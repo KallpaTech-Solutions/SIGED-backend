@@ -41,6 +41,23 @@ namespace Siged.Domain.Entities.Core.Tournaments
         public string? Note { get; set; } // Para anotaciones especiales (ej. "Pasa libre", "W.O.", etc.)
         public Guid? WinnerId { get; set; } // El ID del equipo que avanza (crucial para llaves)
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Segundos de juego ya acumulados del periodo actual (p. ej. antes de pausar transmisión).
+        /// Tiempo mostrado = ClockAccumulatedSeconds + (ahora - ClockPeriodAnchorUtc) cuando hay ancla.
+        /// </summary>
+        public int ClockAccumulatedSeconds { get; set; }
+
+        /// <summary>
+        /// Inicio del tramo actual del cronómetro en UTC (null si no está corriendo: pausa de transmisión o descanso).
+        /// </summary>
+        public DateTime? ClockPeriodAnchorUtc { get; set; }
+
+        /// <summary>
+        /// Qué widget de cronómetro usa esta transmisión (<see cref="MatchClockWidgetKind.None"/> = oculto).
+        /// </summary>
+        public MatchClockWidgetKind ClockWidgetKind { get; set; } = MatchClockWidgetKind.Auto;
+
         public virtual ICollection<MatchEvent> Events { get; set; } = new List<MatchEvent>();
     }
 }

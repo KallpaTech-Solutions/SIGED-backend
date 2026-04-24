@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Linq;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +10,7 @@ using Siged.Application.DTOs.Tournaments.Team;
 using Siged.Application.Interfaces.Almacenamiento;
 using Siged.Domain.Entities.Core;
 using Siged.Domain.Entities.Core.Tournaments;
+using Siged.Domain.Entities.Core.Tournaments.Enums;
 using Siged.Domain.Entities.Security;
 using Siged.Infrastructure.Persistence;
 
@@ -27,6 +29,17 @@ namespace Siged.Api.Controllers.Core.Tournaments
             _context = context;
             _storageService = storageService;
         }
+
+        private int? GetExecutorUsuarioId()
+        {
+            var s = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            return int.TryParse(s, out var id) ? id : null;
+        }
+
+        /// <summary>Delegado de escuela con permiso global o administración de torneo (ve todos los equipos de la org).</summary>
+        private bool HasFullSchoolTeamAccess() =>
+            TournDelegateAuth.IsTournamentAdmin(User) ||
+            User.HasClaim("permission", Permissions.TournTeamManage);
 
         /// <summary>
         /// Retrieves all teams, optionally filtering by active status.
@@ -68,7 +81,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         /// Delegados: escuela vinculada al usuario y equipos activos (para inscripción).
         /// </summary>
         [HttpGet("me/context")]
-        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
         public async Task<IActionResult> GetMyContext()
         {
             var orgId = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
@@ -76,9 +89,25 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 return Ok(new { organizacionId = (int?)null, nombreEscuela = (string?)null, teams = Array.Empty<object>() });
 
             var org = await _context.Organizaciones.AsNoTracking().FirstOrDefaultAsync(o => o.Id == orgId.Value);
-            var teams = await _context.Teams
+
+            var teamsQuery = _context.Teams
                 .AsNoTracking()
-                .Where(t => t.OrganizacionId == orgId.Value && t.IsActive)
+                .Where(t => t.OrganizacionId == orgId.Value && t.IsActive);
+
+            if (!HasFullSchoolTeamAccess())
+            {
+                var executorId = GetExecutorUsuarioId();
+                if (executorId == null)
+                    return Ok(new { organizacionId = orgId, nombreEscuela = org?.Nombre, teams = Array.Empty<object>() });
+
+                var managedIds = await _context.TeamGestores.AsNoTracking()
+                    .Where(g => g.UsuarioId == executorId.Value)
+                    .Select(g => g.TeamId)
+                    .ToListAsync();
+                teamsQuery = teamsQuery.Where(t => managedIds.Contains(t.Id));
+            }
+
+            var teams = await teamsQuery
                 .OrderBy(t => t.Name)
                 .Select(t => new { t.Id, t.Name, t.Initials })
                 .ToListAsync();
@@ -90,7 +119,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
         /// Panel delegado: equipos de la escuela, inscripciones por competencia/torneo y planteles (activos e inactivos).
         /// </summary>
         [HttpGet("me/summary")]
-        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
         public async Task<IActionResult> GetMyDelegateSummary()
         {
             var orgId = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
@@ -99,16 +128,38 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
             var org = await _context.Organizaciones.AsNoTracking().FirstOrDefaultAsync(o => o.Id == orgId.Value);
 
-            var teamList = await _context.Teams
+            var teamQuery = _context.Teams
                 .AsNoTracking()
-                .Where(t => t.OrganizacionId == orgId.Value && t.IsActive)
+                .Where(t => t.OrganizacionId == orgId.Value && t.IsActive);
+
+            if (!HasFullSchoolTeamAccess())
+            {
+                var filterUid = GetExecutorUsuarioId();
+                if (filterUid == null)
+                    return Ok(new { organizacionId = orgId, nombreEscuela = org?.Nombre, teams = Array.Empty<object>() });
+
+                var managedIds = await _context.TeamGestores.AsNoTracking()
+                    .Where(g => g.UsuarioId == filterUid.Value)
+                    .Select(g => g.TeamId)
+                    .ToListAsync();
+                teamQuery = teamQuery.Where(t => managedIds.Contains(t.Id));
+            }
+
+            var teamList = await teamQuery
                 .OrderBy(t => t.Name)
-                .Select(t => new { t.Id, t.Name, t.Initials })
+                .Select(t => new { t.Id, t.Name, t.Initials, t.CreatedByUsuarioId })
                 .ToListAsync();
 
             var teamIds = teamList.Select(t => t.Id).ToList();
             if (teamIds.Count == 0)
                 return Ok(new { organizacionId = orgId, nombreEscuela = org?.Nombre, teams = Array.Empty<object>() });
+
+            var gestorRows = await _context.TeamGestores.AsNoTracking()
+                .Where(g => teamIds.Contains(g.TeamId))
+                .Select(g => new { g.TeamId, g.UsuarioId, g.Kind })
+                .ToListAsync();
+
+            var executorId = GetExecutorUsuarioId();
 
             var ctRows = await _context.CompetitionTeams
                 .AsNoTracking()
@@ -168,11 +219,25 @@ namespace Siged.Api.Controllers.Core.Tournaments
                     .Select(MapPlayer)
                     .ToList();
 
+                var gForTeam = gestorRows.Where(x => x.TeamId == team.Id).ToList();
+                var explicitGestores = gForTeam.Count > 0;
+                var canManage = TournDelegateAuth.IsTournamentAdmin(User) || (
+                    executorId != null && (
+                        !explicitGestores
+                        || gForTeam.Any(x => x.UsuarioId == executorId.Value)
+                    ));
+                var iAmPrincipal = executorId != null && gForTeam.Any(x =>
+                    x.UsuarioId == executorId.Value && x.Kind == TeamGestorKind.Principal);
+
                 return new
                 {
                     team.Id,
                     team.Name,
                     team.Initials,
+                    createdByUsuarioId = team.CreatedByUsuarioId,
+                    canManage,
+                    iAmPrincipal,
+                    tieneGestoresExplicitos = explicitGestores,
                     inscriptions,
                     players
                 };
@@ -245,6 +310,9 @@ namespace Siged.Api.Controllers.Core.Tournaments
         [Authorize(Policy = TournDelegateAuth.PolicyName)]
         public async Task<IActionResult> Create([FromForm] CreateTeamDto dto)
         {
+            var executorId = GetExecutorUsuarioId();
+            if (executorId == null) return Unauthorized();
+
             // Delegado: el OrganizacionId viene siempre del usuario (no del formulario).
             int organizacionIdEquipo;
             if (!TournDelegateAuth.IsTournamentAdmin(User))
@@ -267,6 +335,47 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 return BadRequest(
                     "Solo se pueden crear equipos vinculados a una organización de tipo Escuela o Facultad.");
 
+            var isSuperAdmin = User.IsInRole("SuperAdmin");
+            int principalUserId;
+            int createdByUsuarioIdField;
+
+            if (isSuperAdmin)
+            {
+                if (dto.PrincipalUsuarioId is not > 0)
+                    return BadRequest(
+                        "Como SuperAdmin debés indicar el delegado principal del equipo (PrincipalUsuarioId).");
+                var principal = await _context.Usuarios.AsNoTracking()
+                    .FirstOrDefaultAsync(u => u.Id == dto.PrincipalUsuarioId!.Value);
+                if (principal == null || principal.OrganizacionId != organizacionIdEquipo)
+                    return BadRequest(
+                        "El delegado principal debe ser un usuario activo de la misma organización del equipo.");
+                principalUserId = principal.Id;
+                createdByUsuarioIdField = principal.Id;
+            }
+            else if (TournDelegateAuth.IsTournamentAdmin(User))
+            {
+                if (dto.PrincipalUsuarioId is > 0)
+                {
+                    var designated = await _context.Usuarios.AsNoTracking()
+                        .FirstOrDefaultAsync(u => u.Id == dto.PrincipalUsuarioId!.Value);
+                    if (designated == null || designated.OrganizacionId != organizacionIdEquipo)
+                        return BadRequest(
+                            "El delegado principal indicado debe pertenecer a la organización del equipo.");
+                    principalUserId = designated.Id;
+                    createdByUsuarioIdField = designated.Id;
+                }
+                else
+                {
+                    principalUserId = executorId.Value;
+                    createdByUsuarioIdField = executorId.Value;
+                }
+            }
+            else
+            {
+                principalUserId = executorId.Value;
+                createdByUsuarioIdField = executorId.Value;
+            }
+
             string? logoUrl = dto.LogoFile != null
                 ? await _storageService.UploadFileAsync(dto.LogoFile, "equipos")
                 : null;
@@ -278,10 +387,21 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 Initials = dto.Initials?.ToUpper(),
                 RepresentativeName = dto.RepresentativeName,
                 LogoUrl = logoUrl,
-                IsActive = true
+                IsActive = true,
+                CreatedByUsuarioId = createdByUsuarioIdField
             };
 
             _context.Teams.Add(team);
+            await _context.SaveChangesAsync();
+
+            _context.TeamGestores.Add(new TeamGestor
+            {
+                TeamId = team.Id,
+                UsuarioId = principalUserId,
+                Kind = TeamGestorKind.Principal,
+                AssignedAt = DateTime.UtcNow,
+                AssignedByUsuarioId = executorId
+            });
             await _context.SaveChangesAsync();
 
             return CreatedAtAction(nameof(GetById), new { id = team.Id }, team);
@@ -296,12 +416,8 @@ namespace Siged.Api.Controllers.Core.Tournaments
             var team = await _context.Teams.FindAsync(id);
             if (team == null) return NotFound();
 
-            if (!TournDelegateAuth.IsTournamentAdmin(User))
-            {
-                var myOrg = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
-                if (myOrg == null || team.OrganizacionId != myOrg.Value)
-                    return Forbid();
-            }
+            if (!await TeamManagementAuthorization.CanManageTeamAsync(User, _context, id))
+                return Forbid();
 
             if (dto.LogoFile != null)
             {
@@ -345,6 +461,130 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 return BadRequest("No se puede eliminar: El equipo ya tiene historial en competiciones. Desactívelo.");
 
             _context.Teams.Remove(team);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        /// <summary>Usuarios de la misma escuela para designar co-delegados de un equipo.</summary>
+        [HttpGet("me/org-users")]
+        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        public async Task<IActionResult> GetMyOrgUsersForGestores()
+        {
+            var orgId = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
+            if (orgId == null) return Ok(Array.Empty<object>());
+
+            var list = await _context.Usuarios.AsNoTracking()
+                .Where(u => u.OrganizacionId == orgId && u.EstaActivo)
+                .OrderBy(u => u.Persona.Apellidos)
+                .ThenBy(u => u.Persona.Nombres)
+                .Select(u => new
+                {
+                    u.Id,
+                    u.Username,
+                    nombreCompleto = u.Persona.Nombres + " " + u.Persona.Apellidos
+                })
+                .ToListAsync();
+
+            return Ok(list);
+        }
+
+        /// <summary>Gestores registrados del equipo (misma escuela o admin de torneo).</summary>
+        [HttpGet("{id:guid}/gestores")]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
+        public async Task<IActionResult> GetTeamGestores(Guid id)
+        {
+            var team = await _context.Teams.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id);
+            if (team == null) return NotFound();
+
+            if (!await TeamManagementAuthorization.CanManageTeamAsync(User, _context, id))
+                return Forbid();
+
+            var rows = await _context.TeamGestores.AsNoTracking()
+                .Where(g => g.TeamId == id)
+                .Join(_context.Usuarios.AsNoTracking(),
+                    g => g.UsuarioId,
+                    u => u.Id,
+                    (g, u) => new { g.UsuarioId, g.Kind, u.Username, u.PersonaId })
+                .Join(_context.Personas.AsNoTracking(),
+                    x => x.PersonaId,
+                    p => p.Id,
+                    (x, p) => new
+                    {
+                        x.UsuarioId,
+                        kind = x.Kind.ToString(),
+                        x.Username,
+                        nombreCompleto = p.Nombres + " " + p.Apellidos
+                    })
+                .OrderBy(x => x.nombreCompleto)
+                .ToListAsync();
+
+            return Ok(rows);
+        }
+
+        /// <summary>Delegado principal agrega un co-delegado (máx. 2).</summary>
+        [HttpPost("{id:guid}/gestores")]
+        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        public async Task<IActionResult> AddTeamGestor(Guid id, [FromBody] AddTeamGestorDto dto)
+        {
+            var executorId = GetExecutorUsuarioId();
+            if (executorId == null) return Unauthorized();
+
+            if (!await TeamManagementAuthorization.TeamHasExplicitGestoresAsync(_context, id))
+                return BadRequest(
+                    "Este equipo no tiene delegación explícita en el sistema. Contactá a OTI para migrar el registro.");
+
+            if (!TournDelegateAuth.IsTournamentAdmin(User) &&
+                !await TeamManagementAuthorization.IsPrincipalGestorAsync(_context, id, executorId.Value))
+                return Forbid();
+
+            if (await _context.TeamGestores.AnyAsync(g => g.TeamId == id && g.UsuarioId == dto.UsuarioId))
+                return BadRequest("Ese usuario ya es gestor del equipo.");
+
+            var delegadoCount =
+                await _context.TeamGestores.CountAsync(g =>
+                    g.TeamId == id && g.Kind == TeamGestorKind.Delegado);
+            if (delegadoCount >= TeamManagementAuthorization.MaxDelegadosPorEquipo)
+                return BadRequest(
+                    $"Se permiten como máximo {TeamManagementAuthorization.MaxDelegadosPorEquipo} co-delegados por equipo.");
+
+            var team = await _context.Teams.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id);
+            if (team == null) return NotFound();
+
+            var target = await _context.Usuarios.AsNoTracking().FirstOrDefaultAsync(u => u.Id == dto.UsuarioId);
+            if (target == null || target.OrganizacionId != team.OrganizacionId || !target.EstaActivo)
+                return BadRequest("El usuario debe estar activo y pertenecer a la misma organización del equipo.");
+
+            _context.TeamGestores.Add(new TeamGestor
+            {
+                TeamId = id,
+                UsuarioId = dto.UsuarioId,
+                Kind = TeamGestorKind.Delegado,
+                AssignedAt = DateTime.UtcNow,
+                AssignedByUsuarioId = executorId
+            });
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Co-delegado agregado." });
+        }
+
+        [HttpDelete("{id:guid}/gestores/{usuarioId:int}")]
+        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        public async Task<IActionResult> RemoveTeamGestor(Guid id, int usuarioId)
+        {
+            var executorId = GetExecutorUsuarioId();
+            if (executorId == null) return Unauthorized();
+
+            var row = await _context.TeamGestores.FirstOrDefaultAsync(g =>
+                g.TeamId == id && g.UsuarioId == usuarioId);
+            if (row == null) return NotFound();
+
+            if (row.Kind == TeamGestorKind.Principal && !TournDelegateAuth.IsTournamentAdmin(User))
+                return BadRequest("Solo administración de torneos puede quitar al delegado principal.");
+
+            if (!TournDelegateAuth.IsTournamentAdmin(User) &&
+                !await TeamManagementAuthorization.IsPrincipalGestorAsync(_context, id, executorId.Value))
+                return Forbid();
+
+            _context.TeamGestores.Remove(row);
             await _context.SaveChangesAsync();
             return NoContent();
         }

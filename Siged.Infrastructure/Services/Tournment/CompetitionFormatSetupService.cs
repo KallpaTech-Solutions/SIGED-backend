@@ -109,6 +109,11 @@ namespace Siged.Infrastructure.Services.Tournment
                     IsRandom = dto.KnockoutRandomSeed
                 });
 
+                await PersistFormatSetupSnapshotAsync(competitionId, cancellationToken,
+                    (CompetitionFormatSetupSnapshotKeys.Mode, CompetitionFormatSetupMode.DirectElimination.ToString()),
+                    (CompetitionFormatSetupSnapshotKeys.KnockoutPhaseName, dto.KnockoutPhaseName ?? ""),
+                    (CompetitionFormatSetupSnapshotKeys.KnockoutRandom, dto.KnockoutRandomSeed ? "true" : "false"));
+
                 var phase = await _context.Phases.AsNoTracking()
                     .FirstAsync(p => p.Id == phaseId, cancellationToken);
 
@@ -221,6 +226,14 @@ namespace Siged.Infrastructure.Services.Tournment
                 messages.Add("No se generaron partidos: podés llamar a generate-round-robin por cada grupo cuando quieras.");
             }
 
+            await PersistFormatSetupSnapshotAsync(competitionId, cancellationToken,
+                (CompetitionFormatSetupSnapshotKeys.Mode, CompetitionFormatSetupMode.GroupStageRoundRobin.ToString()),
+                (CompetitionFormatSetupSnapshotKeys.GroupsMaxPerGroup, dto.MaxTeamsPerGroup.ToString()),
+                (CompetitionFormatSetupSnapshotKeys.GroupsQualifiedPerGroup, dto.QualifiedPerGroup.ToString()),
+                (CompetitionFormatSetupSnapshotKeys.GroupsShuffle, dto.ShuffleTeams ? "true" : "false"),
+                (CompetitionFormatSetupSnapshotKeys.GroupsAutoRoundRobin, dto.AutoGenerateRoundRobinFixtures ? "true" : "false"),
+                (CompetitionFormatSetupSnapshotKeys.GroupsPhaseName, dto.GroupPhaseName ?? ""));
+
             await tx.CommitAsync(cancellationToken);
 
             return new SetupCompetitionFormatResultDto
@@ -232,6 +245,31 @@ namespace Siged.Infrastructure.Services.Tournment
                 Groups = groupResults,
                 Messages = messages
             };
+        }
+
+        private async Task PersistFormatSetupSnapshotAsync(
+            Guid competitionId,
+            CancellationToken cancellationToken,
+            params (string Key, string Value)[] rows)
+        {
+            foreach (var (key, value) in rows)
+            {
+                var row = await _context.CompetitionRules
+                    .FirstOrDefaultAsync(r => r.CompetitionId == competitionId && r.RuleKey == key, cancellationToken);
+                if (row == null)
+                {
+                    _context.CompetitionRules.Add(new CompetitionRule
+                    {
+                        CompetitionId = competitionId,
+                        RuleKey = key,
+                        RuleValue = value
+                    });
+                }
+                else
+                    row.RuleValue = value;
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
         }
     }
 }
