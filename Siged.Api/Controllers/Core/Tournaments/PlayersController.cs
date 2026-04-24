@@ -37,8 +37,16 @@ namespace Siged.Api.Controllers.Core.Tournaments
             if (!await TeamManagementAuthorization.CanManageTeamAsync(User, _context, dto.TeamId))
                 return Forbid();
 
-            if (await _context.Players.AnyAsync(p => p.Dni == dto.Dni))
-                return BadRequest("Ese código de identificación ya está registrado.");
+            var dni = (dto.Dni ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(dni))
+                return BadRequest("Indicá el código de identificación del jugador.");
+
+            if (await _context.Players.AnyAsync(p => p.TeamId == dto.TeamId && p.Dni == dni))
+                return BadRequest("Este código ya está registrado en este equipo.");
+
+            if (await DniUsedInSharedCompetitionAsync(dni, dto.TeamId))
+                return BadRequest(
+                    "Este jugador ya figura en otro equipo inscrito en la misma competencia. Podés repetir el código solo en equipos de competencias distintas.");
 
             string? photoUrl = dto.PhotoFile != null
                 ? await _storageService.UploadFileAsync(dto.PhotoFile, "jugadores")
@@ -48,7 +56,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
             {
                 TeamId = dto.TeamId,
                 Name = dto.Name,
-                Dni = dto.Dni,
+                Dni = dni,
                 BirthDate = dto.BirthDate,
                 Position = dto.Position ?? PlayerPosition.None,
                 Number = dto.Number,
@@ -76,14 +84,23 @@ namespace Siged.Api.Controllers.Core.Tournaments
             if (!await TeamManagementAuthorization.CanManageTeamAsync(User, _context, player.TeamId))
                 return Forbid();
 
-            if (await _context.Players.AnyAsync(p => p.Dni == dto.Dni && p.Id != id))
-                return BadRequest("Ese código de identificación ya está registrado.");
+            var dni = (dto.Dni ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(dni))
+                return BadRequest("Indicá el código de identificación del jugador.");
+
+            if (await _context.Players.AnyAsync(p =>
+                    p.TeamId == player.TeamId && p.Dni == dni && p.Id != id))
+                return BadRequest("Este código ya está registrado en este equipo.");
+
+            if (await DniUsedInSharedCompetitionAsync(dni, player.TeamId, id))
+                return BadRequest(
+                    "Este jugador ya figura en otro equipo inscrito en la misma competencia. Podés repetir el código solo en equipos de competencias distintas.");
 
             if (dto.PhotoFile != null)
                 player.PhotoUrl = await _storageService.UploadFileAsync(dto.PhotoFile, "jugadores");
 
             player.Name = dto.Name;
-            player.Dni = dto.Dni;
+            player.Dni = dni;
             player.BirthDate = dto.BirthDate;
             player.Position = dto.Position ?? player.Position;
             player.Number = dto.Number;
@@ -139,6 +156,34 @@ namespace Siged.Api.Controllers.Core.Tournaments
             _context.Players.Remove(player);
             await _context.SaveChangesAsync();
             return NoContent();
+        }
+
+        /// <summary>
+        /// True si ya existe otro jugador con el mismo DNI en un equipo que comparte al menos una competencia con <paramref name="teamId"/>.
+        /// </summary>
+        private async Task<bool> DniUsedInSharedCompetitionAsync(string dni, Guid teamId, Guid? excludePlayerId = null)
+        {
+            var competitionIds = await _context.CompetitionTeams.AsNoTracking()
+                .Where(ct => ct.TeamId == teamId)
+                .Select(ct => ct.CompetitionId)
+                .ToListAsync();
+            if (competitionIds.Count == 0)
+                return false;
+
+            var otherTeamsQuery = _context.Players.AsNoTracking()
+                .Where(p => p.Dni == dni && p.TeamId != teamId);
+            if (excludePlayerId.HasValue)
+                otherTeamsQuery = otherTeamsQuery.Where(p => p.Id != excludePlayerId.Value);
+
+            var otherTeamIds = await otherTeamsQuery
+                .Select(p => p.TeamId)
+                .Distinct()
+                .ToListAsync();
+            if (otherTeamIds.Count == 0)
+                return false;
+
+            return await _context.CompetitionTeams.AsNoTracking()
+                .AnyAsync(ct => competitionIds.Contains(ct.CompetitionId) && otherTeamIds.Contains(ct.TeamId));
         }
     }
 }
