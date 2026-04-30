@@ -58,6 +58,17 @@ namespace Siged.Domain.Entities.Core.Tournaments
         /// </summary>
         public MatchClockWidgetKind ClockWidgetKind { get; set; } = MatchClockWidgetKind.Auto;
 
+        /// <summary>
+        /// Ventana temporal (UTC) para permitir enviar/corregir planilla del local aun con listas cerradas/en vivo.
+        /// </summary>
+        public DateTime? LocalLineupOpenUntilUtc { get; set; }
+
+        /// <summary>
+        /// Ventana temporal (UTC) para permitir enviar/corregir planilla del visitante aun con listas cerradas/en vivo.
+        /// </summary>
+        public DateTime? VisitorLineupOpenUntilUtc { get; set; }
+
         public virtual ICollection<MatchEvent> Events { get; set; } = new List<MatchEvent>();
+        public virtual ICollection<MatchLineup> Lineups { get; set; } = new List<MatchLineup>();
     }
 }

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Siged.Application.DTOs.Tournaments.Playoff;
 
 namespace Siged.Application.DTOs.Tournaments
 {
@@ -40,5 +41,11 @@ namespace Siged.Application.DTOs.Tournaments
 
         /// <summary>Si true, orden aleatorio de cruces; si false, el orden de <see cref="TeamIds"/> define los pares.</summary>
         public bool KnockoutRandomSeed { get; set; } = true;
+
+        /// <summary>
+        /// Cruces manuales opcionales para eliminación directa (local/visitante por partido).
+        /// Si se envía, tiene prioridad sobre el sorteo/orden automático.
+        /// </summary>
+        public List<PlayoffManualPairingDto>? ManualPairings { get; set; }
     }
 }

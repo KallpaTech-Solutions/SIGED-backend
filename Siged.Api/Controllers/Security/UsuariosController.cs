@@ -182,6 +182,20 @@ namespace Siged.Api.Controllers.Security
             if (ejecutor.Rol.Nombre != "SuperAdmin" && usuario.Rol.Nivel >= ejecutor.Rol.Nivel)
                 return StatusCode(StatusCodes.Status403Forbidden, new { message = "No puedes editar a un superior." });
 
+            var rolFueCambiado = false;
+            if (dto.RolId.HasValue && dto.RolId.Value != usuario.RolId)
+            {
+                var rolDestino = await _context.Roles.FirstOrDefaultAsync(r => r.Id == dto.RolId.Value);
+                if (rolDestino == null)
+                    return BadRequest(new { message = "Rol destino no válido." });
+
+                if (ejecutor.Rol.Nombre != "SuperAdmin" && rolDestino.Nivel >= ejecutor.Rol.Nivel)
+                    return StatusCode(StatusCodes.Status403Forbidden, new { message = "No puedes asignar un rol de nivel igual o superior al tuyo." });
+
+                usuario.RolId = dto.RolId.Value;
+                rolFueCambiado = true;
+            }
+
             // Mapeo dinámico
             usuario.Username = dto.Username ?? usuario.Username;
             usuario.Persona.Nombres = dto.Nombres ?? usuario.Persona.Nombres;
@@ -200,8 +214,26 @@ namespace Siged.Api.Controllers.Security
                 if (dto.Oficina != null) enc.Oficina = dto.Oficina;
             }
 
+            if (rolFueCambiado)
+            {
+                // Fuerza la escritura del FK incluso si el contexto mantiene la navegación antigua.
+                _context.Entry(usuario).Property(u => u.RolId).IsModified = true;
+            }
+
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Actualizado correctamente." });
+            var rolGuardado = await _context.Roles
+                .AsNoTracking()
+                .Where(r => r.Id == usuario.RolId)
+                .Select(r => new { r.Id, r.Nombre })
+                .FirstOrDefaultAsync();
+
+            return Ok(new
+            {
+                message = "Actualizado correctamente.",
+                usuarioId = usuario.Id,
+                rolId = usuario.RolId,
+                rol = rolGuardado?.Nombre
+            });
         }
 
         #endregion

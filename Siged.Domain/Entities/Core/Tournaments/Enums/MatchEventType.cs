@@ -23,5 +23,11 @@ namespace Siged.Domain.Entities.Core.Tournaments.Enums
         Tiro = 11,
         /// <summary>Tiro a puerta (fútbol).</summary>
         TiroAPuerta = 12,
+        /// <summary>Segunda amarilla, normalmente deriva en expulsión.</summary>
+        SegundaAmarilla = 13,
+        /// <summary>Roja aplicada por doble amarilla.</summary>
+        RojaPorDobleAmarilla = 14,
+        /// <summary>Penal de tanda no convertido (no suma al marcador de penales).</summary>
+        PenaltyMiss = 15,
     }
 }

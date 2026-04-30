@@ -12,5 +12,6 @@ namespace Siged.Application.DTOs.Tournaments.Playoff
         public string PhaseName { get; set; } = "Primera Ronda";
         public List<Guid> TeamIds { get; set; } = new(); // Equipos seleccionados para el sorteo
         public bool IsRandom { get; set; } = true; // ¿Mezclar aleatoriamente?
+        public List<PlayoffManualPairingDto>? ManualPairings { get; set; }
     }
 }

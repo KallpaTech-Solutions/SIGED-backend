@@ -111,7 +111,9 @@ public static class ServiceExtensions
                 policy.RequireAssertion(ctx =>
                 {
                     var p = ctx.User.FindAll("permission").Select(c => c.Value).ToHashSet();
-                    return p.Contains(Permissions.TournMatchControl) || p.Contains(Permissions.TournManage);
+                    return p.Contains(Permissions.TournMatchControl)
+                        || p.Contains(Permissions.TournManage)
+                        || p.Contains(Permissions.TournTeamManage);
                 }));
 
             options.AddPolicy(Permissions.TournMesaBroadcast, policy =>

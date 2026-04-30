@@ -47,6 +47,25 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
             if (exists) return BadRequest("Este equipo ya está inscrito en la competición.");
 
+            var maxTeamsPerOrganization = competition.MaxTeamsPerOrganization;
+            if (maxTeamsPerOrganization > 0)
+            {
+                var alreadyInscribedForSchool = await _context.CompetitionTeams
+                    .AsNoTracking()
+                    .Include(ct => ct.Team)
+                    .CountAsync(ct =>
+                        ct.CompetitionId == dto.CompetitionId &&
+                        ct.Team.OrganizacionId == team.OrganizacionId);
+
+                if (alreadyInscribedForSchool >= maxTeamsPerOrganization)
+                {
+                    return BadRequest(new
+                    {
+                        message = $"Esta competencia permite máximo {maxTeamsPerOrganization} equipo(s) por escuela. Tu escuela ya tiene {alreadyInscribedForSchool} inscrito(s)."
+                    });
+                }
+            }
+
             // 2. Crear la inscripción
             var inscription = new CompetitionTeam
             {
@@ -58,7 +77,57 @@ namespace Siged.Api.Controllers.Core.Tournaments
             _context.CompetitionTeams.Add(inscription);
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = "Inscripción exitosa." });
+            return Ok(new { message = "Inscripción exitosa.", competition.MaxTeamsPerOrganization });
+        }
+
+        [HttpDelete("{competitionId:guid}/teams/{teamId:guid}")]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
+        public async Task<IActionResult> Delete(Guid competitionId, Guid teamId)
+        {
+            var competition = await _context.Competitions
+                .AsNoTracking()
+                .Include(c => c.Tournament)
+                .FirstOrDefaultAsync(c => c.Id == competitionId);
+
+            if (competition == null) return NotFound("Competencia no encontrada.");
+
+            if (competition.Tournament.Status != TournamentStatus.InscripcionesAbiertas)
+                return BadRequest("Solo se puede quitar una inscripción mientras el torneo está en inscripciones abiertas.");
+
+            var inscription = await _context.CompetitionTeams
+                .Include(ct => ct.Team)
+                .FirstOrDefaultAsync(ct => ct.CompetitionId == competitionId && ct.TeamId == teamId);
+
+            if (inscription == null)
+                return NotFound("No se encontró la inscripción del equipo en esta competencia.");
+
+            if (!await TeamManagementAuthorization.CanManageTeamAsync(User, _context, teamId))
+                return Forbid();
+
+            var usedInGroups = await _context.GroupTeams
+                .AsNoTracking()
+                .AnyAsync(gt => gt.TeamId == teamId && gt.Group.Phase.CompetitionId == competitionId);
+            if (usedInGroups)
+                return BadRequest("No se puede quitar la inscripción porque el equipo ya fue asignado a grupos o fixture.");
+
+            var usedInMatches = await _context.Matches
+                .AsNoTracking()
+                .AnyAsync(m =>
+                    m.Phase.CompetitionId == competitionId &&
+                    (m.LocalTeamId == teamId || m.VisitorTeamId == teamId));
+            if (usedInMatches)
+                return BadRequest("No se puede quitar la inscripción porque el equipo ya tiene partidos generados.");
+
+            var usedInLineups = await _context.MatchLineups
+                .AsNoTracking()
+                .AnyAsync(l => l.TeamId == teamId && l.Match.Phase.CompetitionId == competitionId);
+            if (usedInLineups)
+                return BadRequest("No se puede quitar la inscripción porque el equipo ya tiene planillas de partido.");
+
+            _context.CompetitionTeams.Remove(inscription);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Inscripción eliminada." });
         }
     }
 }

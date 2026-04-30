@@ -30,7 +30,12 @@ public static class ModelBuilderExtensions
             new Rol { Id = 1, Nombre = "SuperAdmin", Descripcion = "Control total (OTI)", Nivel = 100 },
             new Rol { Id = 2, Nombre = "Administrador", Descripcion = "Personal de oficinas centrales", Nivel = 80 },
             new Rol { Id = 3, Nombre = "Encargado", Descripcion = "Docente o administrativo de facultad", Nivel = 50 },
-            new Rol { Id = 4, Nombre = "Estudiante", Descripcion = "Alumno regular UNAS", Nivel = 10 }
+            new Rol { Id = 4, Nombre = "Estudiante", Descripcion = "Alumno regular UNAS", Nivel = 10 },
+            new Rol { Id = 5, Nombre = "Delegado_Escuela", Descripcion = "Delegado que registra equipos y jugadores de su escuela", Nivel = 35 },
+            new Rol { Id = 6, Nombre = "Gestor_Torneo", Descripcion = "Configura competencias, fixture y listas oficiales", Nivel = 60 },
+            new Rol { Id = 7, Nombre = "Mesa_Control", Descripcion = "Registra eventos, actas, sanciones y habilitación deportiva", Nivel = 45 },
+            new Rol { Id = 8, Nombre = "Mesa_Transmision", Descripcion = "Opera widgets, marcadores y transmisión en vivo", Nivel = 35 },
+            new Rol { Id = 9, Nombre = "Encargado_Disciplina", Descripcion = "Responsable operativo de una disciplina o competencia", Nivel = 55 }
         );
 
         // 4. PERMISOS (Dinámicos)

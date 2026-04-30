@@ -34,6 +34,9 @@ namespace Siged.Infrastructure.Persistence
         public DbSet<Journal> Journals { get; set; }
         public DbSet<Match> Matches { get; set; }
         public DbSet<MatchEvent> MatchEvents { get; set; }
+        public DbSet<MatchLineup> MatchLineups { get; set; }
+        public DbSet<MatchLineupPlayer> MatchLineupPlayers { get; set; }
+        public DbSet<PlayerSanction> PlayerSanctions { get; set; }
         public DbSet<Discipline> Disciplines { get; set; }
         public DbSet<DisciplineRule> DisciplineRules { get; set; }
         public DbSet<Team> Teams { get; set; }
@@ -45,12 +48,16 @@ namespace Siged.Infrastructure.Persistence
         public DbSet<GroupTeam> GroupTeams { get; set; } = null!;
         public DbSet<CompetitionRule> CompetitionRules { get; set; }
         public DbSet<CompetitionTeam> CompetitionTeams { get; set; }
+        public DbSet<AppSetting> AppSettings { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
             // Aplica las configuraciones de tablas (DNI, Nombres, etc.)
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+            modelBuilder.Entity<AppSetting>()
+                .HasIndex(x => x.Key)
+                .IsUnique();
 
             // ✅ LLAMA AL GRAN SEMBRADOR
             modelBuilder.Seed();

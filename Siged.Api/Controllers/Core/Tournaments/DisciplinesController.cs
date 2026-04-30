@@ -18,6 +18,11 @@ namespace Siged.Api.Controllers.Core.Tournaments
     [Produces(MediaTypeNames.Application.Json)] // Asegura que todas las respuestas sean JSON
     public class DisciplinesController : ControllerBase
     {
+        private const string DefaultActaLogoLeftKey = "ACTA_DEFAULT_LOGO_LEFT_URL";
+        private const string DefaultActaLogoRightKey = "ACTA_DEFAULT_LOGO_RIGHT_URL";
+        private const string DisciplineActaLogoLeftRuleKey = "ACTA_LOGO_LEFT_URL";
+        private const string DisciplineActaLogoRightRuleKey = "ACTA_LOGO_RIGHT_URL";
+
         private readonly ApplicationDbContext _context;
         private readonly IMediaStorageService _storageService;
 
@@ -205,5 +210,240 @@ namespace Siged.Api.Controllers.Core.Tournaments
             await _context.SaveChangesAsync();
             return Ok(new { message = "Reglas maestras actualizadas." });
         }
+
+        [HttpGet("report-assets/default")]
+        public async Task<IActionResult> GetDefaultReportAssets()
+        {
+            return Ok(await BuildReportAssetsResponseAsync(null));
+        }
+
+        [HttpPut("report-assets/default")]
+        [Authorize(Policy = Permissions.TournManage)]
+        public async Task<IActionResult> UpdateDefaultReportAssets([FromForm] UpdateReportAssetsDto dto)
+        {
+            // Mismo bucket que iconos de disciplina (evita crear "acta-logos" en Supabase).
+            var leftFile = ResolveActaUploadFile(dto.LeftLogoFile, "LeftLogoFile");
+            var rightFile = ResolveActaUploadFile(dto.RightLogoFile, "RightLogoFile");
+            string? left;
+            string? right;
+            try
+            {
+                left = await SaveActaLogoAsync(leftFile, "disciplinas/acta-default-left");
+                right = await SaveActaLogoAsync(rightFile, "disciplinas/acta-default-right");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(502, new { message = "No se pudo subir el logo a almacenamiento.", detail = ex.Message });
+            }
+
+            try
+            {
+                await UpsertAppSettingAsync(DefaultActaLogoLeftKey, dto.ClearLeftLogo ? null : left);
+                await UpsertAppSettingAsync(DefaultActaLogoRightKey, dto.ClearRightLogo ? null : right);
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex) when (IsMissingAppSettingsTable(ex))
+            {
+                return StatusCode(503, new
+                {
+                    message = "Falta la tabla AppSettings en PostgreSQL. Aplique migraciones EF (por ejemplo: dotnet ef database update --project Siged.Infrastructure --startup-project Siged.Api).",
+                    detail = ex.InnerException?.Message ?? ex.Message
+                });
+            }
+            catch (DbUpdateException ex)
+            {
+                return StatusCode(500, new { message = "No se pudo guardar en base de datos.", detail = ex.InnerException?.Message });
+            }
+
+            var response = await BuildReportAssetsResponseAsync(null);
+            return Ok(response);
+        }
+
+        [HttpGet("{id:guid}/report-assets")]
+        public async Task<IActionResult> GetDisciplineReportAssets(Guid id)
+        {
+            var exists = await _context.Disciplines.AnyAsync(x => x.Id == id);
+            if (!exists) return NotFound();
+            var response = await BuildReportAssetsResponseAsync(id);
+            return Ok(response);
+        }
+
+        [HttpPut("{id:guid}/report-assets")]
+        [Authorize(Policy = Permissions.TournManage)]
+        public async Task<IActionResult> UpdateDisciplineReportAssets(Guid id, [FromForm] UpdateReportAssetsDto dto)
+        {
+            var discipline = await _context.Disciplines
+                .Include(d => d.Rules)
+                .FirstOrDefaultAsync(d => d.Id == id);
+            if (discipline == null) return NotFound();
+
+            var leftFile = ResolveActaUploadFile(dto.LeftLogoFile, "LeftLogoFile");
+            var rightFile = ResolveActaUploadFile(dto.RightLogoFile, "RightLogoFile");
+            string? left;
+            string? right;
+            try
+            {
+                left = await SaveActaLogoAsync(leftFile, $"disciplinas/acta-{id}/left");
+                right = await SaveActaLogoAsync(rightFile, $"disciplinas/acta-{id}/right");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(502, new { message = "No se pudo subir el logo a almacenamiento.", detail = ex.Message });
+            }
+
+            UpsertRule(discipline, DisciplineActaLogoLeftRuleKey, dto.ClearLeftLogo ? null : left);
+            UpsertRule(discipline, DisciplineActaLogoRightRuleKey, dto.ClearRightLogo ? null : right);
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex)
+            {
+                return StatusCode(500, new { message = "No se pudo guardar en base de datos.", detail = ex.InnerException?.Message });
+            }
+
+            var response = await BuildReportAssetsResponseAsync(id);
+            return Ok(response);
+        }
+
+        private async Task<ReportAssetsResponse> BuildReportAssetsResponseAsync(Guid? disciplineId)
+        {
+            string? left = null;
+            string? right = null;
+
+            if (disciplineId.HasValue)
+            {
+                var rules = await _context.DisciplineRules.AsNoTracking()
+                    .Where(r => r.DisciplineId == disciplineId.Value
+                        && (r.RuleKey == DisciplineActaLogoLeftRuleKey || r.RuleKey == DisciplineActaLogoRightRuleKey))
+                    .ToListAsync();
+                left = rules.FirstOrDefault(r => r.RuleKey == DisciplineActaLogoLeftRuleKey)?.RuleValue;
+                right = rules.FirstOrDefault(r => r.RuleKey == DisciplineActaLogoRightRuleKey)?.RuleValue;
+            }
+
+            string? fallbackLeft = null;
+            string? fallbackRight = null;
+            try
+            {
+                fallbackLeft = await _context.AppSettings.AsNoTracking()
+                    .Where(x => x.Key == DefaultActaLogoLeftKey)
+                    .Select(x => x.Value)
+                    .FirstOrDefaultAsync();
+                fallbackRight = await _context.AppSettings.AsNoTracking()
+                    .Where(x => x.Key == DefaultActaLogoRightKey)
+                    .Select(x => x.Value)
+                    .FirstOrDefaultAsync();
+            }
+            catch
+            {
+                // BD sin migración de AppSettings u otro error de lectura: seguimos sin logos globales.
+            }
+
+            return new ReportAssetsResponse
+            {
+                LeftLogoUrl = left,
+                RightLogoUrl = right,
+                DefaultLeftLogoUrl = fallbackLeft,
+                DefaultRightLogoUrl = fallbackRight,
+                EffectiveLeftLogoUrl = !string.IsNullOrWhiteSpace(left) ? left : fallbackLeft,
+                EffectiveRightLogoUrl = !string.IsNullOrWhiteSpace(right) ? right : fallbackRight
+            };
+        }
+
+        /// <summary>
+        /// Usa el archivo enlazado al DTO y, si viene vacío, el primero con ese nombre en el multipart
+        /// (evita perder el primer archivo cuando el binder solo rellena uno de dos).
+        /// </summary>
+        private IFormFile? ResolveActaUploadFile(IFormFile? fromDto, string formFieldName)
+        {
+            if (fromDto is { Length: > 0 })
+                return fromDto;
+            var fromForm = Request.Form.Files[formFieldName];
+            return fromForm is { Length: > 0 } ? fromForm : null;
+        }
+
+        private async Task<string?> SaveActaLogoAsync(IFormFile? file, string folder)
+        {
+            if (file == null || file.Length == 0)
+                return null;
+            var url = await _storageService.UploadFileAsync(file, folder);
+            return string.IsNullOrWhiteSpace(url) ? null : url;
+        }
+
+        /// <summary>42P01 / mensaje PG cuando aún no se aplicó la migración AddAppSettingsForReportAssets.</summary>
+        private static bool IsMissingAppSettingsTable(Exception ex)
+        {
+            const string marker = "relation \"AppSettings\" does not exist";
+            for (Exception? e = ex; e != null; e = e.InnerException)
+            {
+                if (e.Message.Contains(marker, StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        private async Task UpsertAppSettingAsync(string key, string? value)
+        {
+            var row = await _context.AppSettings.FirstOrDefaultAsync(x => x.Key == key);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                if (row != null)
+                    _context.AppSettings.Remove(row);
+                return;
+            }
+
+            if (row == null)
+            {
+                _context.AppSettings.Add(new AppSetting { Key = key, Value = value });
+            }
+            else
+            {
+                row.Value = value;
+            }
+        }
+
+        private static void UpsertRule(Discipline discipline, string key, string? valueOrNull)
+        {
+            var row = discipline.Rules.FirstOrDefault(r => r.RuleKey == key);
+            if (string.IsNullOrWhiteSpace(valueOrNull))
+            {
+                if (row != null)
+                    discipline.Rules.Remove(row);
+                return;
+            }
+
+            if (row == null)
+            {
+                discipline.Rules.Add(new DisciplineRule
+                {
+                    DisciplineId = discipline.Id,
+                    RuleKey = key,
+                    RuleValue = valueOrNull
+                });
+            }
+            else
+            {
+                row.RuleValue = valueOrNull;
+            }
+        }
+    }
+
+    public sealed class UpdateReportAssetsDto
+    {
+        public IFormFile? LeftLogoFile { get; set; }
+        public IFormFile? RightLogoFile { get; set; }
+        public bool ClearLeftLogo { get; set; }
+        public bool ClearRightLogo { get; set; }
+    }
+
+    public sealed class ReportAssetsResponse
+    {
+        public string? LeftLogoUrl { get; set; }
+        public string? RightLogoUrl { get; set; }
+        public string? DefaultLeftLogoUrl { get; set; }
+        public string? DefaultRightLogoUrl { get; set; }
+        public string? EffectiveLeftLogoUrl { get; set; }
+        public string? EffectiveRightLogoUrl { get; set; }
     }
 }

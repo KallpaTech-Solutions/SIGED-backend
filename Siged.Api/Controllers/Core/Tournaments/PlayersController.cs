@@ -37,6 +37,11 @@ namespace Siged.Api.Controllers.Core.Tournaments
             if (!await TeamManagementAuthorization.CanManageTeamAsync(User, _context, dto.TeamId))
                 return Forbid();
 
+            await AutoLockDueRostersForTeamAsync(dto.TeamId);
+
+            if (await _context.CompetitionTeams.AsNoTracking().AnyAsync(ct => ct.TeamId == dto.TeamId && ct.RosterLocked))
+                return BadRequest("La lista oficial del equipo está cerrada en una competencia. Reabrila antes de registrar nuevos jugadores.");
+
             var dni = (dto.Dni ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(dni))
                 return BadRequest("Indicá el código de identificación del jugador.");
@@ -138,9 +143,25 @@ namespace Siged.Api.Controllers.Core.Tournaments
             return Ok(new { id, isActive = player.IsActive });
         }
 
-        /// <summary>Borrado físico solo para quienes administran torneos (no delegados de escuela).</summary>
+        /// <summary>Cambia si el jugador está habilitado para jugar. Lo gestionan administración, encargados o mesa de control.</summary>
+        [HttpPatch("{id}/eligibility")]
+        [Authorize]
+        public async Task<IActionResult> SetEligibility(Guid id, [FromBody] PlayerEligibilityDto dto)
+        {
+            if (!CanValidatePlayerEligibility())
+                return Forbid();
+
+            var player = await _context.Players.FirstOrDefaultAsync(p => p.Id == id);
+            if (player == null) return NotFound();
+
+            player.IsEligible = dto.IsEligible;
+            await _context.SaveChangesAsync();
+            return Ok(new { id, isEligible = player.IsEligible });
+        }
+
+        /// <summary>Borrado físico para jugadores sin historial; delegados/co-delegados solo en equipos que gestionan.</summary>
         [HttpDelete("{id}")]
-        [Authorize(Policy = Permissions.TournManage)]
+        [Authorize]
         public async Task<IActionResult> HardDelete(Guid id)
         {
             var player = await _context.Players
@@ -150,12 +171,29 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
             if (player == null) return NotFound();
 
+            if (!TournDelegateAuth.IsTournamentAdmin(User)
+                && !await TeamManagementAuthorization.CanManageTeamAsync(User, _context, player.TeamId))
+                return Forbid();
+
             if (player.MatchEvents.Any())
                 return BadRequest("No se puede eliminar: El jugador tiene historial de goles/tarjetas. Desactívelo.");
+
+            if (await _context.MatchLineupPlayers.AsNoTracking().AnyAsync(x => x.PlayerId == id))
+                return BadRequest("No se puede eliminar: El jugador ya figura en una planilla de partido. Desactívelo.");
+
+            if (await _context.PlayerSanctions.AsNoTracking().AnyAsync(x => x.PlayerId == id))
+                return BadRequest("No se puede eliminar: El jugador tiene historial de sanciones. Desactívelo.");
 
             _context.Players.Remove(player);
             await _context.SaveChangesAsync();
             return NoContent();
+        }
+
+        private bool CanValidatePlayerEligibility()
+        {
+            return User.HasClaim("permission", Permissions.TournManage)
+                || User.HasClaim("permission", Permissions.TournPlayerSanctionManage)
+                || User.HasClaim("permission", Permissions.TournMatchControl);
         }
 
         /// <summary>
@@ -185,5 +223,47 @@ namespace Siged.Api.Controllers.Core.Tournaments
             return await _context.CompetitionTeams.AsNoTracking()
                 .AnyAsync(ct => competitionIds.Contains(ct.CompetitionId) && otherTeamIds.Contains(ct.TeamId));
         }
+
+        private async Task AutoLockDueRostersForTeamAsync(Guid teamId)
+        {
+            var dueCompetitionIds = await _context.Matches
+                .AsNoTracking()
+                .Where(m => m.Status == MatchStatus.Programado
+                    && m.ScheduledAt.Year >= 1900
+                    && (m.LocalTeamId == teamId || m.VisitorTeamId == teamId))
+                .Select(m => new { m.ScheduledAt, m.Phase.CompetitionId })
+                .ToListAsync();
+
+            var nowLimit = DateTime.UtcNow.AddMinutes(5);
+            var ids = dueCompetitionIds
+                .Where(x => DateTime.SpecifyKind(x.ScheduledAt, DateTimeKind.Local).ToUniversalTime() <= nowLimit)
+                .Select(x => x.CompetitionId)
+                .Distinct()
+                .ToList();
+            if (ids.Count == 0)
+                return;
+
+            var rows = await _context.CompetitionTeams
+                .Where(ct => ct.TeamId == teamId && ids.Contains(ct.CompetitionId) && !ct.RosterLocked)
+                .ToListAsync();
+            if (rows.Count == 0)
+                return;
+
+            var now = DateTime.UtcNow;
+            var uid = TeamManagementAuthorization.GetUsuarioIdFromClaims(User);
+            foreach (var row in rows)
+            {
+                row.RosterLocked = true;
+                row.RosterLockedAt = now;
+                row.RosterLockedByUsuarioId = uid;
+            }
+
+            await _context.SaveChangesAsync();
+        }
+    }
+
+    public class PlayerEligibilityDto
+    {
+        public bool IsEligible { get; set; }
     }
 }

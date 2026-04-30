@@ -106,7 +106,8 @@ namespace Siged.Infrastructure.Services.Tournment
                     CompetitionId = competitionId,
                     PhaseName = dto.KnockoutPhaseName,
                     TeamIds = teamIds,
-                    IsRandom = dto.KnockoutRandomSeed
+                    IsRandom = dto.KnockoutRandomSeed,
+                    ManualPairings = dto.ManualPairings
                 });
 
                 await PersistFormatSetupSnapshotAsync(competitionId, cancellationToken,

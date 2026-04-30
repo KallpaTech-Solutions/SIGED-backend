@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Siged.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Siged.Infrastructure.Persistence;
 namespace Siged.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260429181906_AddMatchLineupTemporaryOpenWindow")]
+    partial class AddMatchLineupTemporaryOpenWindow
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -786,28 +789,6 @@ namespace Siged.Infrastructure.Migrations
                     b.UseTphMappingStrategy();
                 });
 
-            modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.AppSetting", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Value")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Key")
-                        .IsUnique();
-
-                    b.ToTable("AppSettings");
-                });
-
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.Competition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -816,12 +797,6 @@ namespace Siged.Infrastructure.Migrations
 
                     b.Property<string>("CategoryName")
                         .HasColumnType("text");
-
-                    b.Property<DateTime?>("ChampionDecidedAtUtc")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<Guid?>("ChampionTeamId")
-                        .HasColumnType("uuid");
 
                     b.Property<Guid>("DisciplineId")
                         .HasColumnType("uuid");
@@ -841,8 +816,6 @@ namespace Siged.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ChampionTeamId");
 
                     b.HasIndex("DisciplineId");
 
@@ -1010,35 +983,35 @@ namespace Siged.Infrastructure.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("3db44700-b9a1-4729-9145-12fa94def7fb"),
+                            Id = new Guid("3d710813-2341-400b-a974-e6168876a705"),
                             DisciplineId = new Guid("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c"),
                             RuleKey = "TIENE_TARJETAS",
                             RuleValue = "True"
                         },
                         new
                         {
-                            Id = new Guid("7f1cb47e-b30e-49fc-801e-22bc2da6bd78"),
+                            Id = new Guid("5f4751ef-fe74-49b3-9084-e2162dc574d1"),
                             DisciplineId = new Guid("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c"),
                             RuleKey = "PUNTOS_POR_VICTORIA",
                             RuleValue = "3"
                         },
                         new
                         {
-                            Id = new Guid("e4850d64-73b1-417e-9c55-d55c49fc7500"),
+                            Id = new Guid("f95c2aba-8611-4a81-a100-b48c057aa417"),
                             DisciplineId = new Guid("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e"),
                             RuleKey = "USA_SETS",
                             RuleValue = "True"
                         },
                         new
                         {
-                            Id = new Guid("e5e78679-27e0-4071-8a3d-521adf53f12e"),
+                            Id = new Guid("4fb5df0d-f7f3-4ebc-8071-bb03c8175b8c"),
                             DisciplineId = new Guid("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e"),
                             RuleKey = "PUNTOS_POR_VICTORIA",
                             RuleValue = "2"
                         },
                         new
                         {
-                            Id = new Guid("16bd5eac-eee3-4462-ab6d-c88506afc380"),
+                            Id = new Guid("9abce7e5-e121-4f48-a24e-7ac1aba77ff3"),
                             DisciplineId = new Guid("c1d2e3f4-a5b6-4c8d-9e0f-1a2b3c4d5e6f"),
                             RuleKey = "CANTIDAD_PERIODOS",
                             RuleValue = "4"
@@ -1668,14 +1641,14 @@ namespace Siged.Infrastructure.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("6d24d74b-c274-4b22-b95f-e1b1e4181afc"),
+                            Id = new Guid("c9cca5d9-9101-4b06-8a8c-33000932157f"),
                             Address = "Campus Principal",
                             Capacity = 5000,
                             Name = "Estadio Universitario UNAS"
                         },
                         new
                         {
-                            Id = new Guid("312197a0-0697-4375-8e05-5a9683fb0b66"),
+                            Id = new Guid("39308023-65d3-4fac-856f-45d348650fb6"),
                             Address = "Pabellón de Sistemas",
                             Capacity = 200,
                             Name = "Losa Deportiva FIIS"
@@ -2230,7 +2203,7 @@ namespace Siged.Infrastructure.Migrations
                             Nombres = "Pedro",
                             CodigoEstudiante = "0020210456",
                             EstaMatriculado = true,
-                            FechaRegistro = new DateTime(2026, 4, 30, 1, 21, 49, 113, DateTimeKind.Utc).AddTicks(1982)
+                            FechaRegistro = new DateTime(2026, 4, 29, 18, 19, 4, 503, DateTimeKind.Utc).AddTicks(5649)
                         });
                 });
 
@@ -2286,11 +2259,6 @@ namespace Siged.Infrastructure.Migrations
 
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.Competition", b =>
                 {
-                    b.HasOne("Siged.Domain.Entities.Core.Tournaments.Team", "ChampionTeam")
-                        .WithMany()
-                        .HasForeignKey("ChampionTeamId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Siged.Domain.Entities.Core.Tournaments.Discipline", "Discipline")
                         .WithMany("Competitions")
                         .HasForeignKey("DisciplineId")
@@ -2302,8 +2270,6 @@ namespace Siged.Infrastructure.Migrations
                         .HasForeignKey("TournamentId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("ChampionTeam");
 
                     b.Navigation("Discipline");
 

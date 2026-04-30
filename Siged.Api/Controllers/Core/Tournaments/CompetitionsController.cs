@@ -65,6 +65,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
                     DisciplineId = dto.DisciplineId,
                     Gender = dto.Gender,
                     CategoryName = dto.CategoryName,
+                    MaxTeamsPerOrganization = Math.Max(0, dto.MaxTeamsPerOrganization),
                     IsActive = true
                 };
 
@@ -109,6 +110,75 @@ namespace Siged.Api.Controllers.Core.Tournaments
         }
 
         /// <summary>
+        /// Campeones ya definidos por año (torneo) y opcionalmente por disciplina — vitrinas e informes.
+        /// </summary>
+        [HttpGet("champions")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetChampionsByYearDiscipline([FromQuery] int year,
+            [FromQuery] Guid? disciplineId = null)
+        {
+            var q = _context.Competitions.AsNoTracking()
+                .Include(c => c.Tournament)
+                .Include(c => c.Discipline)
+                .Include(c => c.ChampionTeam)
+                .Where(c => c.ChampionTeamId != null && c.Tournament.Year == year);
+            if (disciplineId.HasValue)
+                q = q.Where(c => c.DisciplineId == disciplineId.Value);
+
+            var rows = await q
+                .OrderBy(c => c.Tournament.Name)
+                .ThenBy(c => c.CategoryName)
+                .Select(c => new
+                {
+                    competitionId = c.Id,
+                    tournamentId = c.TournamentId,
+                    tournamentName = c.Tournament.Name,
+                    tournamentYear = c.Tournament.Year,
+                    disciplineId = c.DisciplineId,
+                    disciplineName = c.Discipline.Name,
+                    categoryName = c.CategoryName,
+                    gender = c.Gender.ToString(),
+                    championTeamId = c.ChampionTeam!.Id,
+                    championTeamName = c.ChampionTeam.Name,
+                    championTeamLogoUrl = c.ChampionTeam.LogoUrl,
+                    championDecidedAtUtc = c.ChampionDecidedAtUtc
+                })
+                .ToListAsync();
+
+            return Ok(rows);
+        }
+
+        /// <summary>
+        /// Fija o borra el campeón de la competencia (mesa). Útil si la última jornada tiene más de un partido.
+        /// </summary>
+        [HttpPatch("{id}/champion")]
+        [Authorize(Policy = Permissions.TournManage)]
+        public async Task<IActionResult> PatchChampion(Guid id, [FromBody] SetCompetitionChampionDto dto)
+        {
+            var comp = await _context.Competitions.FirstOrDefaultAsync(c => c.Id == id);
+            if (comp == null) return NotFound("Competencia no encontrada.");
+
+            if (dto.ChampionTeamId.HasValue)
+            {
+                var inComp = await _context.CompetitionTeams.AnyAsync(ct =>
+                    ct.CompetitionId == id && ct.TeamId == dto.ChampionTeamId.Value);
+                if (!inComp)
+                    return BadRequest("El equipo no está inscrito en esta competencia.");
+            }
+
+            comp.ChampionTeamId = dto.ChampionTeamId;
+            comp.ChampionDecidedAtUtc = dto.ChampionTeamId.HasValue ? DateTime.UtcNow : null;
+            await _context.SaveChangesAsync();
+            await _vitrina.NotifyLandingRefreshAsync();
+            return Ok(new
+            {
+                comp.Id,
+                comp.ChampionTeamId,
+                comp.ChampionDecidedAtUtc
+            });
+        }
+
+        /// <summary>
         /// Obtiene una competición por su ID, incluyendo su disciplina y torneo relacionados.
         /// </summary>
         /// <param name="id">ID de la competición.</param>
@@ -120,6 +190,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
             var comp = await _context.Competitions
                 .Include(c => c.Tournament)
                 .Include(c => c.Discipline)
+                .Include(c => c.ChampionTeam)
                 .Include(c => c.CompetitionTeams)
                     .ThenInclude(i => i.Team)
                         .ThenInclude(tm => tm.Organizacion)
@@ -136,6 +207,23 @@ namespace Siged.Api.Controllers.Core.Tournaments
             return Ok(comp);
         }
 
+        [HttpPatch("{id}/team-inscription-limit")]
+        [Authorize(Policy = Permissions.TournManage)]
+        public async Task<IActionResult> UpdateTeamInscriptionLimit(Guid id, [FromBody] UpdateCompetitionTeamLimitDto dto)
+        {
+            var comp = await _context.Competitions.FirstOrDefaultAsync(c => c.Id == id);
+            if (comp == null) return NotFound("Competencia no encontrada.");
+
+            comp.MaxTeamsPerOrganization = Math.Max(0, dto.MaxTeamsPerOrganization);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                comp.Id,
+                comp.MaxTeamsPerOrganization
+            });
+        }
+
         /// <summary>
         /// Vitrina pública: fases (modalidad), tablas por grupo (round robin), llaves (eliminación) y partidos.
         /// </summary>
@@ -148,6 +236,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 .Include(c => c.Phases)
                 .Include(c => c.Tournament)
                 .Include(c => c.Discipline)
+                .Include(c => c.ChampionTeam)
                 .FirstOrDefaultAsync(c => c.Id == id);
 
             if (comp == null) return NotFound();
@@ -238,6 +327,10 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 DisciplineName = comp.Discipline.Name,
                 CategoryName = comp.CategoryName,
                 Gender = comp.Gender.ToString(),
+                ChampionTeamId = comp.ChampionTeamId,
+                ChampionDecidedAtUtc = comp.ChampionDecidedAtUtc,
+                ChampionTeamName = comp.ChampionTeam != null ? comp.ChampionTeam.Name : null,
+                ChampionTeamLogoUrl = comp.ChampionTeam != null ? comp.ChampionTeam.LogoUrl : null,
                 Phases = phasesOut,
                 MatchSummary = new
                 {
@@ -408,26 +501,114 @@ namespace Siged.Api.Controllers.Core.Tournaments
         /// 
         /// </summary>
         /// <param name="id">ID de la competición a eliminar.</param>
+        /// <param name="force">Si es true, elimina también partidos, eventos, actas y todo el historial relacionado.</param>
         /// <returns>Resultado de la operación.</returns>
         [HttpDelete("{id}")]
-        [Authorize(Policy = Permissions.SecurityRoleManage)]   
-        public async Task<IActionResult> HardDelete(Guid id)
+        [Authorize(Policy = Permissions.TournManage)]
+        public async Task<IActionResult> HardDelete(Guid id, [FromQuery] bool force = false)
         {
-            var competition = await _context.Competitions
-                .Include(c => c.Phases) // Cargamos las fases para verificar
-                .FirstOrDefaultAsync(c => c.Id == id);
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+
+            var competition = await _context.Competitions.FirstOrDefaultAsync(c => c.Id == id);
 
             if (competition == null) return NotFound();
 
-            // 🛡️ REGLA DE ORO DE INGENIERÍA:
-            // No permitas borrar si ya tiene datos relacionados (fases, grupos, etc.)
-            if (competition.Phases.Any())
+            var matchIds = await _context.Matches
+                .Where(m => m.Phase.CompetitionId == id)
+                .Select(m => m.Id)
+                .ToListAsync();
+
+            var hasActa = matchIds.Count > 0 && await _context.MatchEvents
+                .AnyAsync(e => matchIds.Contains(e.MatchId));
+            var hasClosedMatches = await _context.Matches
+                .AnyAsync(m => m.Phase.CompetitionId == id &&
+                    (m.Status == MatchStatus.EnVivo || m.Status == MatchStatus.Finalizado));
+
+            if ((hasActa || hasClosedMatches) && !force)
             {
-                return BadRequest("No se puede eliminar físicamente porque ya tiene fases configuradas. Use la desactivación en su lugar.");
+                return Conflict(new
+                {
+                    message = "La competencia ya tiene historial de partidos, eventos o actas. Si confirmas, se eliminará todo definitivamente.",
+                    canForceDelete = true,
+                    details = new
+                    {
+                        matches = matchIds.Count,
+                        hasActa,
+                        hasClosedMatches
+                    }
+                });
             }
+
+            var lineupIds = await _context.MatchLineups
+                .Where(l => matchIds.Contains(l.MatchId))
+                .Select(l => l.Id)
+                .ToListAsync();
+
+            var lineupPlayers = await _context.MatchLineupPlayers
+                .Where(lp => lineupIds.Contains(lp.MatchLineupId))
+                .ToListAsync();
+            _context.MatchLineupPlayers.RemoveRange(lineupPlayers);
+
+            var lineups = await _context.MatchLineups
+                .Where(l => matchIds.Contains(l.MatchId))
+                .ToListAsync();
+            _context.MatchLineups.RemoveRange(lineups);
+
+            var events = await _context.MatchEvents
+                .Where(e => matchIds.Contains(e.MatchId))
+                .ToListAsync();
+            _context.MatchEvents.RemoveRange(events);
+
+            var matches = await _context.Matches
+                .Where(m => matchIds.Contains(m.Id))
+                .ToListAsync();
+            _context.Matches.RemoveRange(matches);
+
+            var phaseIds = await _context.Phases
+                .Where(p => p.CompetitionId == id)
+                .Select(p => p.Id)
+                .ToListAsync();
+
+            var journals = await _context.Journals
+                .Where(j => phaseIds.Contains(j.PhaseId))
+                .ToListAsync();
+            _context.Journals.RemoveRange(journals);
+
+            var groupIds = await _context.Groups
+                .Where(g => phaseIds.Contains(g.PhaseId))
+                .Select(g => g.Id)
+                .ToListAsync();
+
+            var groupTeams = await _context.GroupTeams
+                .Where(gt => groupIds.Contains(gt.GroupId))
+                .ToListAsync();
+            _context.GroupTeams.RemoveRange(groupTeams);
+
+            var groups = await _context.Groups
+                .Where(g => groupIds.Contains(g.Id))
+                .ToListAsync();
+            _context.Groups.RemoveRange(groups);
+
+            var phases = await _context.Phases
+                .Where(p => phaseIds.Contains(p.Id))
+                .ToListAsync();
+            _context.Phases.RemoveRange(phases);
+
+            var rules = await _context.CompetitionRules
+                .Where(r => r.CompetitionId == id)
+                .ToListAsync();
+            _context.CompetitionRules.RemoveRange(rules);
+
+            var teams = await _context.CompetitionTeams
+                .Where(ct => ct.CompetitionId == id)
+                .ToListAsync();
+            _context.CompetitionTeams.RemoveRange(teams);
 
             _context.Competitions.Remove(competition);
             await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+            await _vitrina.NotifyTournamentsRefreshAsync();
+            await _vitrina.NotifyLandingRefreshAsync();
 
             return NoContent();
         }
@@ -491,5 +672,10 @@ namespace Siged.Api.Controllers.Core.Tournaments
             await _context.SaveChangesAsync();
             return Ok(new { message = "Reglas actualizadas correctamente." });
         }
+    }
+
+    public class UpdateCompetitionTeamLimitDto
+    {
+        public int MaxTeamsPerOrganization { get; set; } = 1;
     }
 }

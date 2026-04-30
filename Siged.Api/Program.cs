@@ -12,8 +12,10 @@ using Siged.Infrastructure;
 using Siged.Infrastructure.Persistence;
 using Siged.Infrastructure.Services.Almacenamiento;
 using Siged.Infrastructure.Services.Tournment;
+using QuestPDF.Infrastructure;
 
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+QuestPDF.Settings.License = LicenseType.Community;
 var builder = WebApplication.CreateBuilder(args);
 
 // --- 1. CONFIGURACIÓN DE SERVICIOS ---

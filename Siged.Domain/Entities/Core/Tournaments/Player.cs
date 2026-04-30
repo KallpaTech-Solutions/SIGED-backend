@@ -40,5 +40,7 @@ namespace Siged.Domain.Entities.Core.Tournaments
 
         // Relación con eventos de partido (Goles, Tarjetas)
         public virtual ICollection<MatchEvent> MatchEvents { get; set; } = new List<MatchEvent>();
+        public virtual ICollection<MatchLineupPlayer> MatchLineupPlayers { get; set; } = new List<MatchLineupPlayer>();
+        public virtual ICollection<PlayerSanction> Sanctions { get; set; } = new List<PlayerSanction>();
     }
 }

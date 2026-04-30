@@ -71,6 +71,9 @@ namespace Siged.Api.Controllers.Core.Tournaments
             var tournament = await _context.Tournaments
                 .Include(t => t.Competitions)
                     .ThenInclude(c => c.Discipline)
+                .Include(t => t.Competitions)
+                    .ThenInclude(c => c.CompetitionTeams)
+                        .ThenInclude(ct => ct.Team)
                 .FirstOrDefaultAsync(t => t.Id == id);
 
             if (tournament == null) return NotFound();
@@ -108,6 +111,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
                     DisciplineName = c.Discipline.Name,
                     Gender = c.Gender.ToString(),
                     c.CategoryName,
+                    c.MaxTeamsPerOrganization,
                     Teams = c.CompetitionTeams
                         .Where(ct => ct.Team.IsActive)
                         .OrderBy(ct => ct.Team.Name)
@@ -118,6 +122,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
                             TeamName = ct.Team.Name,
                             ct.Team.Initials,
                             ct.Team.LogoUrl,
+                            ct.Team.OrganizacionId,
                             Escuela = ct.Team.Organizacion != null ? ct.Team.Organizacion.Nombre : null,
                             ct.Puntos,
                             ct.PartidosJugados,
@@ -210,6 +215,122 @@ namespace Siged.Api.Controllers.Core.Tournaments
             };
 
             return Ok(stats);
+        }
+
+        [HttpGet("{id}/admin-alerts")]
+        [Authorize(Policy = Permissions.TournView)]
+        public async Task<IActionResult> GetAdminAlerts(Guid id)
+        {
+            var exists = await _context.Tournaments.AsNoTracking().AnyAsync(t => t.Id == id);
+            if (!exists) return NotFound("Torneo no encontrado.");
+
+            var alerts = new List<object>();
+            var mesaPath = $"/PanelControl/torneos/{id}/mesa";
+
+            var matches = await _context.Matches.AsNoTracking()
+                .Where(m => m.Phase.Competition.TournamentId == id && m.IsActive)
+                .Select(m => new
+                {
+                    m.Id,
+                    m.ScheduledAt,
+                    m.VenueId,
+                    m.LocalTeamId,
+                    m.VisitorTeamId,
+                    LocalTeamName = m.LocalTeam != null ? m.LocalTeam.Name : "Local",
+                    VisitorTeamName = m.VisitorTeam != null ? m.VisitorTeam.Name : "Visitante",
+                    CompetitionId = m.Phase.CompetitionId,
+                    CompetitionName = (m.Phase.Competition.Discipline.Name + " " + (m.Phase.Competition.CategoryName ?? "")).Trim()
+                })
+                .ToListAsync();
+
+            var missingSchedule = matches.Where(m => m.ScheduledAt.Year < 1900).Take(10).ToList();
+            foreach (var m in missingSchedule)
+            {
+                alerts.Add(new
+                {
+                    id = $"match-time-{m.Id}",
+                    type = "missing_match_time",
+                    severity = "warning",
+                    message = $"Partido sin hora: {m.LocalTeamName} vs {m.VisitorTeamName}.",
+                    actionLabel = "Configurar partido",
+                    path = mesaPath
+                });
+            }
+
+            var missingVenue = matches.Where(m => m.VenueId == null).Take(10).ToList();
+            foreach (var m in missingVenue)
+            {
+                alerts.Add(new
+                {
+                    id = $"match-venue-{m.Id}",
+                    type = "missing_match_venue",
+                    severity = "warning",
+                    message = $"Partido sin campo/sede: {m.LocalTeamName} vs {m.VisitorTeamName}.",
+                    actionLabel = "Asignar campo",
+                    path = mesaPath
+                });
+            }
+
+            var now = DateTime.UtcNow;
+            var soonLimit = now.AddHours(24);
+            var soonMatches = matches
+                .Where(m => m.ScheduledAt.Year >= 1900)
+                .Where(m =>
+                {
+                    var scheduled = DateTime.SpecifyKind(m.ScheduledAt, DateTimeKind.Local).ToUniversalTime();
+                    return scheduled >= now && scheduled <= soonLimit;
+                })
+                .ToList();
+            var soonIds = soonMatches.Select(m => m.Id).ToList();
+            var lineupRows = await _context.MatchLineups.AsNoTracking()
+                .Where(l => soonIds.Contains(l.MatchId))
+                .Select(l => new { l.MatchId, l.TeamId })
+                .ToListAsync();
+            foreach (var m in soonMatches)
+            {
+                if (m.LocalTeamId.HasValue && !lineupRows.Any(l => l.MatchId == m.Id && l.TeamId == m.LocalTeamId.Value))
+                {
+                    alerts.Add(new
+                    {
+                        id = $"lineup-local-{m.Id}",
+                        type = "missing_lineup",
+                        severity = "danger",
+                        message = $"Falta planilla de {m.LocalTeamName} para su próximo partido.",
+                        actionLabel = "Ir al partido",
+                        path = $"/torneos/partido/{m.Id}"
+                    });
+                }
+
+                if (m.VisitorTeamId.HasValue && !lineupRows.Any(l => l.MatchId == m.Id && l.TeamId == m.VisitorTeamId.Value))
+                {
+                    alerts.Add(new
+                    {
+                        id = $"lineup-visitor-{m.Id}",
+                        type = "missing_lineup",
+                        severity = "danger",
+                        message = $"Falta planilla de {m.VisitorTeamName} para su próximo partido.",
+                        actionLabel = "Ir al partido",
+                        path = $"/torneos/partido/{m.Id}"
+                    });
+                }
+            }
+
+            var openRosterCount = await _context.CompetitionTeams.AsNoTracking()
+                .CountAsync(ct => ct.Competition.TournamentId == id && !ct.RosterLocked);
+            if (openRosterCount > 0)
+            {
+                alerts.Add(new
+                {
+                    id = "open-rosters",
+                    type = "open_rosters",
+                    severity = "info",
+                    message = $"{openRosterCount} listas oficiales siguen abiertas.",
+                    actionLabel = "Gestionar listas",
+                    path = $"/PanelControl/torneos/{id}"
+                });
+            }
+
+            return Ok(alerts);
         }
         // --- CREACIÓN Y EDICIÓN ---
         /// <summary>
@@ -336,10 +457,10 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
 
         /// <summary>  
-        /// Elimina un torneo de forma permanente. Solo permitido si no tiene disciplinas configuradas (Nivel Ingeniería).
+        /// Elimina un torneo de forma permanente. Solo permitido si no tiene competencias configuradas.
         /// </summary>
         [HttpDelete("{id}")]
-        [Authorize(Policy = Permissions.SecurityRoleManage)] // Solo SuperAdmin puede eliminar definitivamente por la criticidad de esta acción
+        [Authorize(Policy = Permissions.TournManage)]
         public async Task<IActionResult> HardDelete(Guid id)
         {
             var tournament = await _context.Tournaments
@@ -348,9 +469,8 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
             if (tournament == null) return NotFound();
 
-            // Validación de Ingeniería: No borrar si ya tiene disciplinas configuradas
             if (tournament.Competitions.Any())
-                return BadRequest("No se puede eliminar: El torneo ya tiene competiciones asignadas. Desactívelo en su lugar.");
+                return BadRequest("No se puede eliminar: el torneo ya tiene competencias asignadas. Ocultalo o elimina primero sus competencias relacionadas.");
 
             _context.Tournaments.Remove(tournament);
             await _context.SaveChangesAsync();

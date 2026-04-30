@@ -77,6 +77,93 @@ namespace Siged.Api.Controllers.Core.Tournaments
             return Ok(teams);
         }
 
+        [HttpGet("management-catalog")]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
+        public async Task<IActionResult> GetManagementCatalog(
+            [FromQuery] string? search = null,
+            [FromQuery] int? organizacionId = null,
+            [FromQuery] bool includeInactive = true)
+        {
+            var isAdmin = TournDelegateAuth.IsTournamentAdmin(User);
+            var executorId = GetExecutorUsuarioId();
+            var myOrgId = await TournDelegateAuth.GetOrganizacionIdAsync(User, _context);
+
+            var query = _context.Teams
+                .AsNoTracking()
+                .Include(t => t.Organizacion)
+                .Include(t => t.CreatedByUsuario)
+                    .ThenInclude(u => u!.Persona)
+                .AsQueryable();
+
+            if (!includeInactive)
+                query = query.Where(t => t.IsActive);
+
+            if (isAdmin)
+            {
+                if (organizacionId is > 0)
+                    query = query.Where(t => t.OrganizacionId == organizacionId.Value);
+            }
+            else
+            {
+                if (myOrgId == null)
+                    return Ok(new { organizations = Array.Empty<object>(), teams = Array.Empty<object>() });
+
+                query = query.Where(t => t.OrganizacionId == myOrgId.Value);
+            }
+
+            var s = (search ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(s))
+            {
+                var like = $"%{s}%";
+                query = query.Where(t =>
+                    EF.Functions.ILike(t.Name, like) ||
+                    (t.Initials != null && EF.Functions.ILike(t.Initials, like)) ||
+                    (t.RepresentativeName != null && EF.Functions.ILike(t.RepresentativeName, like)) ||
+                    EF.Functions.ILike(t.Organizacion.Nombre, like));
+            }
+
+            var rows = await query
+                .OrderBy(t => t.Organizacion.Nombre)
+                .ThenBy(t => t.Name)
+                .Select(t => new
+                {
+                    t.Id,
+                    t.Name,
+                    t.Initials,
+                    t.LogoUrl,
+                    t.RepresentativeName,
+                    t.IsActive,
+                    t.CreatedByUsuarioId,
+                    createdBy = t.CreatedByUsuario != null
+                        ? t.CreatedByUsuario.Persona.Nombres + " " + t.CreatedByUsuario.Persona.Apellidos
+                        : null,
+                    organizacionId = t.OrganizacionId,
+                    escuela = t.Organizacion.Nombre,
+                    playerCount = t.Players.Count,
+                    activePlayerCount = t.Players.Count(p => p.IsActive),
+                    inscriptions = t.CompetitionTeams.Select(ct => new
+                    {
+                        ct.CompetitionId,
+                        tournamentId = ct.Competition.TournamentId,
+                        tournamentName = ct.Competition.Tournament.Name,
+                        competitionLabel = ct.Competition.Discipline.Name + " · " + (ct.Competition.CategoryName ?? "—") + " · " + ct.Competition.Gender,
+                        ct.RosterLocked
+                    }).ToList(),
+                    canEdit = isAdmin || (executorId != null && t.CreatedByUsuarioId == executorId.Value),
+                    canDelete = isAdmin || (executorId != null && t.CreatedByUsuarioId == executorId.Value)
+                })
+                .ToListAsync();
+
+            var organizations = await _context.Organizaciones
+                .AsNoTracking()
+                .Where(o => isAdmin ? rows.Select(r => r.organizacionId).Contains(o.Id) : myOrgId != null && o.Id == myOrgId.Value)
+                .OrderBy(o => o.Nombre)
+                .Select(o => new { o.Id, o.Nombre })
+                .ToListAsync();
+
+            return Ok(new { organizations, teams = rows });
+        }
+
         /// <summary>
         /// Delegados: escuela vinculada al usuario y equipos activos (para inscripción).
         /// </summary>
@@ -172,7 +259,10 @@ namespace Siged.Api.Controllers.Core.Tournaments
                     TournamentName = ct.Competition.Tournament.Name,
                     DisciplineName = ct.Competition.Discipline.Name,
                     ct.Competition.CategoryName,
-                    Gender = ct.Competition.Gender
+                    Gender = ct.Competition.Gender,
+                    ct.RosterLocked,
+                    ct.RosterLockedAt,
+                    ct.RosterUnlockedAt
                 })
                 .ToListAsync();
 
@@ -208,7 +298,10 @@ namespace Siged.Api.Controllers.Core.Tournaments
                         competitionId = x.CompetitionId,
                         tournamentId = x.TournamentId,
                         tournamentName = x.TournamentName,
-                        competitionLabel = $"{x.DisciplineName} · {x.CategoryName?.Trim() ?? "—"} · {x.Gender}"
+                        competitionLabel = $"{x.DisciplineName} · {x.CategoryName?.Trim() ?? "—"} · {x.Gender}",
+                        rosterLocked = x.RosterLocked,
+                        rosterLockedAt = x.RosterLockedAt,
+                        rosterUnlockedAt = x.RosterUnlockedAt
                     })
                     .OrderBy(x => x.tournamentName)
                     .ThenBy(x => x.competitionLabel)
@@ -447,19 +540,47 @@ namespace Siged.Api.Controllers.Core.Tournaments
         }
 
         [HttpDelete("{id}")]
-        [Authorize(Policy = Permissions.TournManage)]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
         public async Task<IActionResult> HardDelete(Guid id)
         {
+            var executorId = GetExecutorUsuarioId();
             var team = await _context.Teams
+                .Include(t => t.Players)
+                    .ThenInclude(p => p.MatchEvents)
+                .Include(t => t.Players)
+                    .ThenInclude(p => p.MatchLineupPlayers)
+                .Include(t => t.Players)
+                    .ThenInclude(p => p.Sanctions)
+                .Include(t => t.CompetitionTeams)
                 .Include(t => t.GroupTeams)
+                .Include(t => t.Gestores)
                 .FirstOrDefaultAsync(t => t.Id == id);
 
             if (team == null) return NotFound();
 
-            // Protección de integridad: Si el equipo ya está en un grupo (ya participó), no borrar.
+            var canDelete = TournDelegateAuth.IsTournamentAdmin(User)
+                || (executorId != null && team.CreatedByUsuarioId == executorId.Value);
+            if (!canDelete)
+                return Forbid();
+
             if (team.GroupTeams.Any())
                 return BadRequest("No se puede eliminar: El equipo ya tiene historial en competiciones. Desactívelo.");
 
+            if (await _context.Matches.AsNoTracking().AnyAsync(m => m.LocalTeamId == id || m.VisitorTeamId == id))
+                return BadRequest("No se puede eliminar: El equipo ya tiene partidos generados. Desactívelo.");
+
+            if (await _context.MatchLineups.AsNoTracking().AnyAsync(l => l.TeamId == id))
+                return BadRequest("No se puede eliminar: El equipo ya tiene planillas de partido. Desactívelo.");
+
+            if (await _context.PlayerSanctions.AsNoTracking().AnyAsync(s => s.TeamId == id))
+                return BadRequest("No se puede eliminar: El equipo tiene historial de sanciones. Desactívelo.");
+
+            if (team.Players.Any(p => p.MatchEvents.Any() || p.MatchLineupPlayers.Any() || p.Sanctions.Any()))
+                return BadRequest("No se puede eliminar: uno o más jugadores ya tienen historial deportivo. Desactívelo.");
+
+            _context.TeamGestores.RemoveRange(team.Gestores);
+            _context.CompetitionTeams.RemoveRange(team.CompetitionTeams);
+            _context.Players.RemoveRange(team.Players);
             _context.Teams.Remove(team);
             await _context.SaveChangesAsync();
             return NoContent();

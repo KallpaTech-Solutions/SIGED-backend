@@ -16,6 +16,11 @@ namespace Siged.Domain.Entities.Security
         public const int AdminId = 2;
         public const int EncargadoId = 3;
         public const int EstudianteId = 4;
+        public const int DelegadoEscuelaId = 5;
+        public const int GestorTorneoId = 6;
+        public const int MesaControlId = 7;
+        public const int MesaTransmisionId = 8;
+        public const int EncargadoDisciplinaId = 9;
 
         // --- 2. SEMILLA DE ROLES ---
         // Esta lista alimenta a RolConfiguration.cs
@@ -24,7 +29,12 @@ namespace Siged.Domain.Entities.Security
             new Rol { Id = SuperAdminId, Nombre = "SuperAdmin", Descripcion = "Acceso total a la configuración del sistema SIGED." },
             new Rol { Id = AdminId, Nombre = "Admin", Descripcion = "Responsable de la OTI - Gestión de usuarios y reportes." },
             new Rol { Id = EncargadoId, Nombre = "Encargado", Descripcion = "Docente o personal encargado de una disciplina deportiva." },
-            new Rol { Id = EstudianteId, Nombre = "Estudiante", Descripcion = "Alumno matriculado habilitado para participar en eventos." }
+            new Rol { Id = EstudianteId, Nombre = "Estudiante", Descripcion = "Alumno matriculado habilitado para participar en eventos." },
+            new Rol { Id = DelegadoEscuelaId, Nombre = "Delegado_Escuela", Descripcion = "Delegado que registra equipos y jugadores de su escuela." },
+            new Rol { Id = GestorTorneoId, Nombre = "Gestor_Torneo", Descripcion = "Operador que configura competencias, fixture y listas oficiales." },
+            new Rol { Id = MesaControlId, Nombre = "Mesa_Control", Descripcion = "Mesa que controla partidos, eventos, actas y habilitación deportiva." },
+            new Rol { Id = MesaTransmisionId, Nombre = "Mesa_Transmision", Descripcion = "Operador de transmisión y widgets en vivo." },
+            new Rol { Id = EncargadoDisciplinaId, Nombre = "Encargado_Disciplina", Descripcion = "Responsable deportivo de una disciplina o competencia." }
         };
 
         // --- 3. CATÁLOGO MAESTRO DE PERMISOS ---
@@ -40,12 +50,12 @@ namespace Siged.Domain.Entities.Security
             new(SecurityRoleManage, "Gestionar roles y permisos", "SEGURIDAD", new[] { SuperAdminId,AdminId }),
 
             // CATEGORÍA: CORE (Organización)
-            new(CoreOrgView, "Ver facultades y sedes", "CORE", new[] { SuperAdminId, AdminId, EncargadoId, EstudianteId }),
+            new(CoreOrgView, "Ver facultades y sedes", "CORE", new[] { SuperAdminId, AdminId, EncargadoId, EstudianteId, DelegadoEscuelaId, GestorTorneoId, MesaControlId, MesaTransmisionId, EncargadoDisciplinaId }),
             new(CoreOrgManage, "Administrar facultades", "CORE", new[] { SuperAdminId }),
 
             // CATEGORÍA: COMPETENCIAS
-            new(CompTournView, "Ver torneos y resultados", "COMPETENCIAS", new[] { SuperAdminId, AdminId, EncargadoId, EstudianteId }),
-            new(CompTournManage, "Gestionar fechas y torneos", "COMPETENCIAS", new[] { SuperAdminId, EncargadoId }),
+            new(CompTournView, "Ver torneos y resultados", "COMPETENCIAS", new[] { SuperAdminId, AdminId, EncargadoId, EstudianteId, DelegadoEscuelaId, GestorTorneoId, MesaControlId, MesaTransmisionId, EncargadoDisciplinaId }),
+            new(CompTournManage, "Gestionar fechas y torneos", "COMPETENCIAS", new[] { SuperAdminId, EncargadoId, GestorTorneoId, EncargadoDisciplinaId }),
 
             // CATEGORÍA: NOTICIAS
             new(NewsView, "Ver gestión de noticias", "NOTICIAS", new[] { SuperAdminId, AdminId, EncargadoId }),
@@ -53,13 +63,16 @@ namespace Siged.Domain.Entities.Security
             new(NewsManage, "Publicar, editar y archivar noticias", "NOTICIAS", new[] { SuperAdminId, AdminId }),
             new(NewsHighlight, "Marcar noticias como destacadas", "NOTICIAS", new[] { SuperAdminId, AdminId }),
             // CATEGORÍA: TORNEOS
-            new(TournView, "Ver torneos, tablas y cronogramas", "TORNEOS", new[] { SuperAdminId, AdminId, EncargadoId, EstudianteId }),
+            new(TournView, "Ver torneos, tablas y cronogramas", "TORNEOS", new[] { SuperAdminId, AdminId, EncargadoId, EstudianteId, DelegadoEscuelaId, GestorTorneoId, MesaControlId, MesaTransmisionId, EncargadoDisciplinaId }),
             new(TournManage, "Crear y editar torneos y disciplinas", "TORNEOS", new[] { SuperAdminId, AdminId }),
-            new(TournConfig, "Gestionar fases y sorteo de grupos", "TORNEOS", new[] { SuperAdminId, AdminId, EncargadoId }),
-            new(TournTeamManage, "Administrar equipos y enrolamiento de jugadores", "TORNEOS", new[] { SuperAdminId, EncargadoId }),
-            new(TournFixture, "Generar fixture y programar encuentros", "TORNEOS", new[] { SuperAdminId, EncargadoId }),
-            new(TournMatchControl, "Control de mesa: registro de eventos y actas", "TORNEOS", new[] { SuperAdminId, EncargadoId }),
-            new(TournMatchWidgets, "Widgets de transmisión: tableros y tiempos en vivo", "TORNEOS", new[] { SuperAdminId, AdminId, EncargadoId }),
+            new(TournConfig, "Gestionar fases y sorteo de grupos", "TORNEOS", new[] { SuperAdminId, AdminId, EncargadoId, GestorTorneoId, EncargadoDisciplinaId }),
+            new(TournTeamManage, "Administrar equipos y enrolamiento de jugadores", "TORNEOS", new[] { SuperAdminId, EncargadoId, DelegadoEscuelaId, GestorTorneoId, EncargadoDisciplinaId }),
+            new(TournFixture, "Generar fixture y programar encuentros", "TORNEOS", new[] { SuperAdminId, EncargadoId, GestorTorneoId, EncargadoDisciplinaId }),
+            new(TournMatchControl, "Control de mesa: registro de eventos y actas", "TORNEOS", new[] { SuperAdminId, EncargadoId, MesaControlId, EncargadoDisciplinaId }),
+            new(TournMatchWidgets, "Widgets de transmisión: tableros y tiempos en vivo", "TORNEOS", new[] { SuperAdminId, AdminId, EncargadoId, MesaTransmisionId }),
+            new(TournLineupManage, "Gestionar planillas y listas oficiales de equipos", "TORNEOS", new[] { SuperAdminId, EncargadoId, GestorTorneoId, EncargadoDisciplinaId }),
+            new(TournMatchReportDownload, "Descargar actas de partido", "TORNEOS", new[] { SuperAdminId, AdminId, EncargadoId, GestorTorneoId, MesaControlId, EncargadoDisciplinaId }),
+            new(TournPlayerSanctionManage, "Gestionar sanciones e inhabilitaciones de jugadores", "TORNEOS", new[] { SuperAdminId, EncargadoId, MesaControlId, EncargadoDisciplinaId }),
          };
 
         // --- 4. CONSTANTES DE STRINGS (Para usar en [Authorize(Policy = ...)]) ---
@@ -84,6 +97,9 @@ namespace Siged.Domain.Entities.Security
         public const string TournMatchControl = "tourn.match.control"; // Registrar goles, tarjetas y finalizar (Mesa)
         /// <summary>Configurar plantillas de vitrina (tableros deportivos / tiempos) durante la transmisión.</summary>
         public const string TournMatchWidgets = "tourn.match.widgets";
+        public const string TournLineupManage = "tourn.lineup.manage";
+        public const string TournMatchReportDownload = "tourn.match.report.download";
+        public const string TournPlayerSanctionManage = "tourn.player.sanction.manage";
         /// <summary>Política compuesta: mesa o operador de gráficos puede guardar el JSON del widget.</summary>
         public const string TournMesaBroadcast = "tourn.mesa.broadcast";
         // CATEGORÍA: NOTICIAS

@@ -18,6 +18,11 @@ namespace Siged.Domain.Entities.Core.Tournaments
 
         public DateTime FechaInscripcion { get; set; } = DateTime.UtcNow;
 
+        public bool RosterLocked { get; set; } = false;
+        public DateTime? RosterLockedAt { get; set; }
+        public DateTime? RosterUnlockedAt { get; set; }
+        public int? RosterLockedByUsuarioId { get; set; }
+
         // Para el motor de tablas de posiciones
         public int Puntos { get; set; } = 0;
         public int PartidosJugados { get; set; } = 0;

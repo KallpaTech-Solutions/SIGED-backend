@@ -23,9 +23,19 @@ namespace Siged.Domain.Entities.Core.Tournaments
 
         public Gender Gender { get; set; }
         public string? CategoryName { get; set; } // Ej: "Libre", "Inter-Escuelas"
+        /// <summary>
+        /// Máximo de equipos que una misma escuela puede inscribir en esta competencia. 0 = sin límite.
+        /// </summary>
+        public int MaxTeamsPerOrganization { get; set; } = 1;
 
         // Una competición tiene sus propias fases y partidos
         public virtual ICollection<Phase> Phases { get; set; } = new List<Phase>();
+
+        /// <summary>Equipo campeón al cerrar la competencia (eliminatoria: final única; RR: manual o futura regla).</summary>
+        public Guid? ChampionTeamId { get; set; }
+        public virtual Team? ChampionTeam { get; set; }
+        /// <summary>UTC en que se fijó el campeón (automático o manual).</summary>
+        public DateTime? ChampionDecidedAtUtc { get; set; }
 
         /// <summary>Solo salida JSON (GET): opciones usadas al generar el formato inicial.</summary>
         [NotMapped]

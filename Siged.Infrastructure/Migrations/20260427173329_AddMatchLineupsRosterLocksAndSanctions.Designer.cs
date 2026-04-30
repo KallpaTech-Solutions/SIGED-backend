@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Siged.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Siged.Infrastructure.Persistence;
 namespace Siged.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260427173329_AddMatchLineupsRosterLocksAndSanctions")]
+    partial class AddMatchLineupsRosterLocksAndSanctions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -114,31 +117,6 @@ namespace Siged.Infrastructure.Migrations
                         },
                         new
                         {
-                            PermisosIdPermiso = "core.org.view",
-                            RolesId = 5
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "core.org.view",
-                            RolesId = 6
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "core.org.view",
-                            RolesId = 7
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "core.org.view",
-                            RolesId = 8
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "core.org.view",
-                            RolesId = 9
-                        },
-                        new
-                        {
                             PermisosIdPermiso = "core.org.manage",
                             RolesId = 1
                         },
@@ -164,31 +142,6 @@ namespace Siged.Infrastructure.Migrations
                         },
                         new
                         {
-                            PermisosIdPermiso = "comp.tourn.view",
-                            RolesId = 5
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "comp.tourn.view",
-                            RolesId = 6
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "comp.tourn.view",
-                            RolesId = 7
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "comp.tourn.view",
-                            RolesId = 8
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "comp.tourn.view",
-                            RolesId = 9
-                        },
-                        new
-                        {
                             PermisosIdPermiso = "comp.tourn.manage",
                             RolesId = 1
                         },
@@ -196,16 +149,6 @@ namespace Siged.Infrastructure.Migrations
                         {
                             PermisosIdPermiso = "comp.tourn.manage",
                             RolesId = 3
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "comp.tourn.manage",
-                            RolesId = 6
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "comp.tourn.manage",
-                            RolesId = 9
                         },
                         new
                         {
@@ -279,31 +222,6 @@ namespace Siged.Infrastructure.Migrations
                         },
                         new
                         {
-                            PermisosIdPermiso = "tourn.view",
-                            RolesId = 5
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.view",
-                            RolesId = 6
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.view",
-                            RolesId = 7
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.view",
-                            RolesId = 8
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.view",
-                            RolesId = 9
-                        },
-                        new
-                        {
                             PermisosIdPermiso = "tourn.manage",
                             RolesId = 1
                         },
@@ -329,16 +247,6 @@ namespace Siged.Infrastructure.Migrations
                         },
                         new
                         {
-                            PermisosIdPermiso = "tourn.config",
-                            RolesId = 6
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.config",
-                            RolesId = 9
-                        },
-                        new
-                        {
                             PermisosIdPermiso = "tourn.team.manage",
                             RolesId = 1
                         },
@@ -346,21 +254,6 @@ namespace Siged.Infrastructure.Migrations
                         {
                             PermisosIdPermiso = "tourn.team.manage",
                             RolesId = 3
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.team.manage",
-                            RolesId = 5
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.team.manage",
-                            RolesId = 6
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.team.manage",
-                            RolesId = 9
                         },
                         new
                         {
@@ -374,16 +267,6 @@ namespace Siged.Infrastructure.Migrations
                         },
                         new
                         {
-                            PermisosIdPermiso = "tourn.fixture",
-                            RolesId = 6
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.fixture",
-                            RolesId = 9
-                        },
-                        new
-                        {
                             PermisosIdPermiso = "tourn.match.control",
                             RolesId = 1
                         },
@@ -391,16 +274,6 @@ namespace Siged.Infrastructure.Migrations
                         {
                             PermisosIdPermiso = "tourn.match.control",
                             RolesId = 3
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.match.control",
-                            RolesId = 7
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.match.control",
-                            RolesId = 9
                         },
                         new
                         {
@@ -419,11 +292,6 @@ namespace Siged.Infrastructure.Migrations
                         },
                         new
                         {
-                            PermisosIdPermiso = "tourn.match.widgets",
-                            RolesId = 8
-                        },
-                        new
-                        {
                             PermisosIdPermiso = "tourn.lineup.manage",
                             RolesId = 1
                         },
@@ -431,16 +299,6 @@ namespace Siged.Infrastructure.Migrations
                         {
                             PermisosIdPermiso = "tourn.lineup.manage",
                             RolesId = 3
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.lineup.manage",
-                            RolesId = 6
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.lineup.manage",
-                            RolesId = 9
                         },
                         new
                         {
@@ -459,21 +317,6 @@ namespace Siged.Infrastructure.Migrations
                         },
                         new
                         {
-                            PermisosIdPermiso = "tourn.match.report.download",
-                            RolesId = 6
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.match.report.download",
-                            RolesId = 7
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.match.report.download",
-                            RolesId = 9
-                        },
-                        new
-                        {
                             PermisosIdPermiso = "tourn.player.sanction.manage",
                             RolesId = 1
                         },
@@ -481,16 +324,6 @@ namespace Siged.Infrastructure.Migrations
                         {
                             PermisosIdPermiso = "tourn.player.sanction.manage",
                             RolesId = 3
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.player.sanction.manage",
-                            RolesId = 7
-                        },
-                        new
-                        {
-                            PermisosIdPermiso = "tourn.player.sanction.manage",
-                            RolesId = 9
                         });
                 });
 
@@ -786,28 +619,6 @@ namespace Siged.Infrastructure.Migrations
                     b.UseTphMappingStrategy();
                 });
 
-            modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.AppSetting", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Value")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Key")
-                        .IsUnique();
-
-                    b.ToTable("AppSettings");
-                });
-
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.Competition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -816,12 +627,6 @@ namespace Siged.Infrastructure.Migrations
 
                     b.Property<string>("CategoryName")
                         .HasColumnType("text");
-
-                    b.Property<DateTime?>("ChampionDecidedAtUtc")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<Guid?>("ChampionTeamId")
-                        .HasColumnType("uuid");
 
                     b.Property<Guid>("DisciplineId")
                         .HasColumnType("uuid");
@@ -832,17 +637,10 @@ namespace Siged.Infrastructure.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("MaxTeamsPerOrganization")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(1);
-
                     b.Property<Guid>("TournamentId")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ChampionTeamId");
 
                     b.HasIndex("DisciplineId");
 
@@ -1010,35 +808,35 @@ namespace Siged.Infrastructure.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("3db44700-b9a1-4729-9145-12fa94def7fb"),
+                            Id = new Guid("39a08858-4533-4fa5-bc5f-c1505bcdb479"),
                             DisciplineId = new Guid("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c"),
                             RuleKey = "TIENE_TARJETAS",
                             RuleValue = "True"
                         },
                         new
                         {
-                            Id = new Guid("7f1cb47e-b30e-49fc-801e-22bc2da6bd78"),
+                            Id = new Guid("d6234156-b585-4f1b-b998-b16c306685b3"),
                             DisciplineId = new Guid("7f6a5b4c-3d2e-4f0a-9b8c-7d6e5f4a3b2c"),
                             RuleKey = "PUNTOS_POR_VICTORIA",
                             RuleValue = "3"
                         },
                         new
                         {
-                            Id = new Guid("e4850d64-73b1-417e-9c55-d55c49fc7500"),
+                            Id = new Guid("c9e39f92-a3a0-4370-bcbe-a480365b81f1"),
                             DisciplineId = new Guid("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e"),
                             RuleKey = "USA_SETS",
                             RuleValue = "True"
                         },
                         new
                         {
-                            Id = new Guid("e5e78679-27e0-4071-8a3d-521adf53f12e"),
+                            Id = new Guid("ed1c2a4b-a496-47f7-a9b3-d03ce777dd68"),
                             DisciplineId = new Guid("b1c2d3e4-f5a6-4b8c-9d0e-1f2a3b4c5d6e"),
                             RuleKey = "PUNTOS_POR_VICTORIA",
                             RuleValue = "2"
                         },
                         new
                         {
-                            Id = new Guid("16bd5eac-eee3-4462-ab6d-c88506afc380"),
+                            Id = new Guid("5c2b83f9-729e-4d4a-91d1-c1e9da9f9ed4"),
                             DisciplineId = new Guid("c1d2e3f4-a5b6-4c8d-9e0f-1a2b3c4d5e6f"),
                             RuleKey = "CANTIDAD_PERIODOS",
                             RuleValue = "4"
@@ -1179,9 +977,6 @@ namespace Siged.Infrastructure.Migrations
                     b.Property<Guid>("JournalId")
                         .HasColumnType("uuid");
 
-                    b.Property<DateTime?>("LocalLineupOpenUntilUtc")
-                        .HasColumnType("timestamp without time zone");
-
                     b.Property<int?>("LocalPenaltyScore")
                         .HasColumnType("integer");
 
@@ -1206,9 +1001,6 @@ namespace Siged.Infrastructure.Migrations
 
                     b.Property<Guid?>("VenueId")
                         .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("VisitorLineupOpenUntilUtc")
-                        .HasColumnType("timestamp without time zone");
 
                     b.Property<int?>("VisitorPenaltyScore")
                         .HasColumnType("integer");
@@ -1668,14 +1460,14 @@ namespace Siged.Infrastructure.Migrations
                     b.HasData(
                         new
                         {
-                            Id = new Guid("6d24d74b-c274-4b22-b95f-e1b1e4181afc"),
+                            Id = new Guid("8c14cce7-142d-4a0e-88e1-969835cfb6b8"),
                             Address = "Campus Principal",
                             Capacity = 5000,
                             Name = "Estadio Universitario UNAS"
                         },
                         new
                         {
-                            Id = new Guid("312197a0-0697-4375-8e05-5a9683fb0b66"),
+                            Id = new Guid("24b68005-35c1-45a2-b74a-e7bd0f4c01db"),
                             Address = "Pabellón de Sistemas",
                             Capacity = 200,
                             Name = "Losa Deportiva FIIS"
@@ -1959,41 +1751,6 @@ namespace Siged.Infrastructure.Migrations
                             Descripcion = "Alumno regular UNAS",
                             Nivel = 10,
                             Nombre = "Estudiante"
-                        },
-                        new
-                        {
-                            Id = 5,
-                            Descripcion = "Delegado que registra equipos y jugadores de su escuela",
-                            Nivel = 35,
-                            Nombre = "Delegado_Escuela"
-                        },
-                        new
-                        {
-                            Id = 6,
-                            Descripcion = "Configura competencias, fixture y listas oficiales",
-                            Nivel = 60,
-                            Nombre = "Gestor_Torneo"
-                        },
-                        new
-                        {
-                            Id = 7,
-                            Descripcion = "Registra eventos, actas, sanciones y habilitación deportiva",
-                            Nivel = 45,
-                            Nombre = "Mesa_Control"
-                        },
-                        new
-                        {
-                            Id = 8,
-                            Descripcion = "Opera widgets, marcadores y transmisión en vivo",
-                            Nivel = 35,
-                            Nombre = "Mesa_Transmision"
-                        },
-                        new
-                        {
-                            Id = 9,
-                            Descripcion = "Responsable operativo de una disciplina o competencia",
-                            Nivel = 55,
-                            Nombre = "Encargado_Disciplina"
                         });
                 });
 
@@ -2230,7 +1987,7 @@ namespace Siged.Infrastructure.Migrations
                             Nombres = "Pedro",
                             CodigoEstudiante = "0020210456",
                             EstaMatriculado = true,
-                            FechaRegistro = new DateTime(2026, 4, 30, 1, 21, 49, 113, DateTimeKind.Utc).AddTicks(1982)
+                            FechaRegistro = new DateTime(2026, 4, 27, 17, 33, 27, 676, DateTimeKind.Utc).AddTicks(1343)
                         });
                 });
 
@@ -2286,11 +2043,6 @@ namespace Siged.Infrastructure.Migrations
 
             modelBuilder.Entity("Siged.Domain.Entities.Core.Tournaments.Competition", b =>
                 {
-                    b.HasOne("Siged.Domain.Entities.Core.Tournaments.Team", "ChampionTeam")
-                        .WithMany()
-                        .HasForeignKey("ChampionTeamId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Siged.Domain.Entities.Core.Tournaments.Discipline", "Discipline")
                         .WithMany("Competitions")
                         .HasForeignKey("DisciplineId")
@@ -2302,8 +2054,6 @@ namespace Siged.Infrastructure.Migrations
                         .HasForeignKey("TournamentId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("ChampionTeam");
 
                     b.Navigation("Discipline");
 

@@ -1,8 +1,10 @@
-﻿using System.Text.Json;
+﻿using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Siged.Api.Authorization;
 using Siged.Api.Hubs;
 using Siged.Api.Services;
 using Siged.Application.DTOs.Tournaments.Match;
@@ -11,6 +13,7 @@ using Siged.Domain.Entities.Core.Tournaments.Enums;
 using Siged.Domain.Entities.Security;
 using Siged.Infrastructure.Persistence;
 using Siged.Infrastructure.Services.Tournment;
+using Siged.Api.Reports;
 
 
 namespace Siged.Api.Controllers.Core.Tournaments
@@ -20,6 +23,11 @@ namespace Siged.Api.Controllers.Core.Tournaments
     [Authorize]
     public class MatchesController : ControllerBase
     {
+        private const string DefaultActaLogoLeftKey = "ACTA_DEFAULT_LOGO_LEFT_URL";
+        private const string DefaultActaLogoRightKey = "ACTA_DEFAULT_LOGO_RIGHT_URL";
+        private const string DisciplineActaLogoLeftRuleKey = "ACTA_LOGO_LEFT_URL";
+        private const string DisciplineActaLogoRightRuleKey = "ACTA_LOGO_RIGHT_URL";
+
         private readonly ApplicationDbContext _context;
         private readonly IHubContext<TournamentHub> _hubContext;
         private readonly StandingsService _standingsService;
@@ -56,6 +64,40 @@ namespace Siged.Api.Controllers.Core.Tournaments
             return true;
         }
 
+        private async Task<string?> ValidatePlayersForMatchActaAsync(Match match, Guid teamId, Guid? playerId, Guid? relatedPlayerId)
+        {
+            var playerIds = new[] { playerId, relatedPlayerId }
+                .Where(x => x.HasValue)
+                .Select(x => x!.Value)
+                .Distinct()
+                .ToList();
+            if (playerIds.Count == 0)
+                return null;
+
+            var lineup = await _context.MatchLineups.AsNoTracking()
+                .Include(l => l.Players)
+                .FirstOrDefaultAsync(l => l.MatchId == match.Id && l.TeamId == teamId);
+
+            if (lineup != null && lineup.Status != MatchLineupStatus.Draft)
+            {
+                var allowed = lineup.Players.Select(p => p.PlayerId).ToHashSet();
+                if (playerIds.Any(pid => !allowed.Contains(pid)))
+                    return "El jugador no está incluido en la planilla enviada para este partido.";
+            }
+
+            var competitionId = await _context.Matches.AsNoTracking()
+                .Where(m => m.Id == match.Id)
+                .Select(m => m.Phase.CompetitionId)
+                .FirstOrDefaultAsync();
+
+            var hasSanction = await _context.PlayerSanctions.AsNoTracking()
+                .AnyAsync(s => s.IsActive
+                    && playerIds.Contains(s.PlayerId)
+                    && (s.CompetitionId == null || s.CompetitionId == competitionId));
+
+            return hasSanction ? "El jugador tiene una sanción activa y no puede registrarse en el acta." : null;
+        }
+
         private async Task PushBroadcastAfterActaAsync(Guid matchId, Match match, object? lastEvent = null)
         {
             var widgetCur = _broadcastWidgetStore.GetSnapshotJson(matchId);
@@ -72,6 +114,8 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 status = match.Status.ToString(),
                 localScore = match.LocalScore,
                 visitorScore = match.VisitorScore,
+                localPenaltyScore = match.LocalPenaltyScore ?? 0,
+                visitorPenaltyScore = match.VisitorPenaltyScore ?? 0,
                 clockAccumulatedSeconds = match.ClockAccumulatedSeconds,
                 clockPeriodAnchorUtc = match.ClockPeriodAnchorUtc,
                 clockWidgetKind = match.ClockWidgetKind.ToString(),
@@ -242,6 +286,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 return NotFound("Partido sin competencia asociada.");
 
             var comp = match.Phase.Competition;
+            await AutoLockRostersForMatchDetailAsync(match.Id);
             var tournament = comp.Tournament;
             if (tournament == null)
                 return NotFound("Torneo no disponible para este partido.");
@@ -285,6 +330,82 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 })
                 .ToListAsync();
 
+            var lineups = await _context.MatchLineups
+                .AsNoTracking()
+                .Where(l => l.MatchId == id)
+                .Include(l => l.Team)
+                .Include(l => l.Players)
+                    .ThenInclude(p => p.Player)
+                .Select(l => new
+                {
+                    l.Id,
+                    l.MatchId,
+                    l.TeamId,
+                    TeamName = l.Team.Name,
+                    Status = l.Status.ToString(),
+                    l.SubmittedAt,
+                    l.LockedAt,
+                    l.Observation,
+                    StartersCount = l.Players.Count(p => p.Role == MatchLineupPlayerRole.Starter),
+                    SubstitutesCount = l.Players.Count(p => p.Role == MatchLineupPlayerRole.Substitute),
+                    Players = l.Players
+                        .OrderBy(p => p.Role)
+                        .ThenBy(p => p.ShirtNumber ?? p.Player.Number ?? 999)
+                        .ThenBy(p => p.Player.Name)
+                        .Select(p => new
+                        {
+                            p.Id,
+                            p.PlayerId,
+                            PlayerName = p.Player.Name,
+                            Role = p.Role.ToString(),
+                            Number = p.ShirtNumber ?? p.Player.Number,
+                            Position = p.Position.ToString(),
+                            p.IsCaptain,
+                            p.IsGoalkeeper,
+                            p.Observation
+                        })
+                })
+                .ToListAsync();
+
+            var localRosterLocked = false;
+            var visitorRosterLocked = false;
+            if (match.LocalTeamId.HasValue || match.VisitorTeamId.HasValue)
+            {
+                var teamIds = new[] { match.LocalTeamId, match.VisitorTeamId }
+                    .Where(x => x.HasValue)
+                    .Select(x => x!.Value)
+                    .ToList();
+                var lockRows = await _context.CompetitionTeams
+                    .AsNoTracking()
+                    .Where(ct => ct.CompetitionId == comp.Id && teamIds.Contains(ct.TeamId))
+                    .Select(ct => new { ct.TeamId, ct.RosterLocked })
+                    .ToListAsync();
+                localRosterLocked = match.LocalTeamId.HasValue
+                    && lockRows.FirstOrDefault(r => r.TeamId == match.LocalTeamId.Value)?.RosterLocked == true;
+                visitorRosterLocked = match.VisitorTeamId.HasValue
+                    && lockRows.FirstOrDefault(r => r.TeamId == match.VisitorTeamId.Value)?.RosterLocked == true;
+            }
+
+            var canSubmitLocalLineup = false;
+            var canSubmitVisitorLineup = false;
+            string? localLineupDelegate = null;
+            string? visitorLineupDelegate = null;
+            if (User?.Identity?.IsAuthenticated == true)
+            {
+                if (match.LocalTeamId.HasValue)
+                {
+                    canSubmitLocalLineup = await TeamManagementAuthorization.CanSubmitMatchLineupAsync(
+                        User, _context, match.LocalTeamId.Value);
+                    localLineupDelegate = await ResolveLineupDelegateLabelAsync(match.LocalTeamId.Value);
+                }
+                if (match.VisitorTeamId.HasValue)
+                {
+                    canSubmitVisitorLineup = await TeamManagementAuthorization.CanSubmitMatchLineupAsync(
+                        User, _context, match.VisitorTeamId.Value);
+                    visitorLineupDelegate = await ResolveLineupDelegateLabelAsync(match.VisitorTeamId.Value);
+                }
+            }
+
             var disciplineTitle = comp.Discipline?.Name ?? match.Discipline?.Name ?? "Deporte";
             var competitionLabel = string.IsNullOrWhiteSpace(comp.CategoryName)
                 ? disciplineTitle
@@ -299,12 +420,24 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 match.VisitorScore,
                 match.LocalTeamId,
                 match.VisitorTeamId,
+                LocalPenaltyScore = match.LocalPenaltyScore ?? 0,
+                VisitorPenaltyScore = match.VisitorPenaltyScore ?? 0,
+                PhaseIsDirectElimination = match.Phase?.IsDirectElimination ?? false,
+                PhaseIsDoubleLeg = match.Phase?.IsDoubleLeg ?? false,
                 LocalTeamName = match.LocalTeam?.Name ?? "Por asignar",
                 LocalTeamLogo = match.LocalTeam?.LogoUrl,
                 VisitorTeamName = match.VisitorTeam?.Name ?? "Por asignar",
                 VisitorTeamLogo = match.VisitorTeam?.LogoUrl,
+                CanSubmitLocalLineup = canSubmitLocalLineup,
+                CanSubmitVisitorLineup = canSubmitVisitorLineup,
+                LocalLineupDelegate = localLineupDelegate,
+                VisitorLineupDelegate = visitorLineupDelegate,
+                LocalRosterLocked = localRosterLocked,
+                VisitorRosterLocked = visitorRosterLocked,
+                LocalLineupOpenUntilUtc = match.LocalLineupOpenUntilUtc,
+                VisitorLineupOpenUntilUtc = match.VisitorLineupOpenUntilUtc,
                 DisciplineName = match.Discipline?.Name ?? disciplineTitle,
-                PhaseName = match.Phase.Name,
+                PhaseName = match.Phase?.Name ?? "",
                 Gender = comp.Gender.ToString(),
                 TournamentId = tournament.Id,
                 TournamentName = tournament.Name,
@@ -321,7 +454,8 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 ClockPeriodAnchorUtc = clockRow?.ClockPeriodAnchorUtc ?? match.ClockPeriodAnchorUtc,
                 ClockWidgetKind = match.ClockWidgetKind.ToString(),
                 BroadcastWidgetJson = _broadcastWidgetStore.GetSnapshotJson(id),
-                Events = events
+                Events = events,
+                Lineups = lineups
             });
         }
 
@@ -395,6 +529,81 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
             return Ok(events);
         }
+
+        [HttpGet("{id}/report")]
+        [Authorize(Policy = Permissions.TournMatchReportDownload)]
+        public async Task<IActionResult> GetMatchReport(Guid id)
+        {
+            var report = await BuildMatchReportAsync(id);
+            return report == null ? NotFound("Partido no encontrado.") : Ok(report);
+        }
+
+        [HttpGet("{id}/report.csv")]
+        [Authorize(Policy = Permissions.TournMatchReportDownload)]
+        public async Task<IActionResult> DownloadMatchReportCsv(Guid id)
+        {
+            var report = await BuildMatchReportAsync(id);
+            if (report == null) return NotFound("Partido no encontrado.");
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Partido,{Csv(report.TournamentName ?? "")},{Csv(report.CompetitionName ?? "")}");
+            sb.AppendLine($"Marcador final,{report.LocalScore},{report.VisitorScore}");
+            sb.AppendLine($"Definición,{Csv(report.DecisionType ?? "No definida")}");
+            sb.AppendLine($"Penales,{report.LocalPenaltyScore},{report.VisitorPenaltyScore}");
+            sb.AppendLine();
+            sb.AppendLine("Equipo,N°,Jugador,Condición,Goles,Amarillas,Segunda amarilla,Roja directa,Roja doble amarilla,Cambios sale,Cambios entra,Observación");
+            foreach (var team in report.Teams)
+            {
+                foreach (var p in team.Players)
+                {
+                    sb.AppendLine(string.Join(",", new[]
+                    {
+                        Csv(team.TeamName),
+                        Csv(p.Number?.ToString() ?? ""),
+                        Csv(p.PlayerName),
+                        Csv(p.Role),
+                        p.Goals.ToString(),
+                        p.YellowCards.ToString(),
+                        p.SecondYellowCards.ToString(),
+                        p.DirectRedCards.ToString(),
+                        p.DoubleYellowRedCards.ToString(),
+                        p.SubstitutionsOut.ToString(),
+                        p.SubstitutionsIn.ToString(),
+                        Csv(p.Observation ?? "")
+                    }));
+                }
+
+                sb.AppendLine(string.Join(",", new[]
+                {
+                    Csv(team.TeamName),
+                    "",
+                    Csv("RESUMEN"),
+                    "",
+                    team.TotalGoals.ToString(),
+                    team.TotalYellowCards.ToString(),
+                    team.TotalSecondYellowCards.ToString(),
+                    team.TotalDirectRedCards.ToString(),
+                    team.TotalDoubleYellowRedCards.ToString(),
+                    team.TotalSubstitutionsOut.ToString(),
+                    team.TotalSubstitutionsIn.ToString(),
+                    Csv($"Titulares: {team.StartersCount}; Suplentes: {team.SubstitutesCount}")
+                }));
+            }
+
+            var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+            return File(bytes, "text/csv; charset=utf-8", $"acta-partido-{id}.csv");
+        }
+
+        [HttpGet("{id}/report.pdf")]
+        [Authorize(Policy = Permissions.TournMatchReportDownload)]
+        public async Task<IActionResult> DownloadMatchReportPdf(Guid id)
+        {
+            var report = await BuildMatchReportAsync(id);
+            if (report == null) return NotFound("Partido no encontrado.");
+            var pdf = MatchActaPdfComposer.Generate(report);
+            return File(pdf, "application/pdf", $"acta-partido-{id}.pdf");
+        }
+
         // 3. Cambiar estado (mesa / transmisión: En vivo, programado, suspendido, etc.)
         [HttpPatch("{id}/status")]
         [Authorize(Policy = Permissions.TournMatchControl)]
@@ -466,6 +675,38 @@ namespace Siged.Api.Controllers.Core.Tournaments
             return Ok(match);
         }
 
+        /// <summary>
+        /// Mesa: registrar goles de la tanda de penales cuando la eliminatoria (ida simple) queda empatada en el marcador global.
+        /// </summary>
+        [HttpPatch("{id}/penalty-score")]
+        [Authorize(Policy = Permissions.TournMatchControl)]
+        public async Task<IActionResult> PatchPenaltyScore(Guid id, [FromBody] PatchPenaltyScoreDto dto)
+        {
+            if (dto.LocalPenaltyScore < 0 || dto.VisitorPenaltyScore < 0)
+                return BadRequest(new { message = "Los penales no pueden ser negativos." });
+            if (dto.LocalPenaltyScore > 99 || dto.VisitorPenaltyScore > 99)
+                return BadRequest(new { message = "Revisá los valores de la tanda de penales." });
+
+            var match = await _context.Matches
+                .Include(m => m.Phase)
+                .FirstOrDefaultAsync(m => m.Id == id);
+            if (match == null) return NotFound();
+            if (match.Status == MatchStatus.Finalizado)
+                return BadRequest(new { message = "El partido ya está finalizado." });
+            if (match.Phase?.IsDirectElimination != true)
+                return BadRequest(new { message = "Solo en fase eliminatoria se registra la tanda de penales." });
+            if (match.Phase?.IsDoubleLeg == true)
+                return BadRequest(new { message = "En ida y vuelta el desempate no se registra por penales en este mismo partido." });
+            if (match.LocalScore != match.VisitorScore)
+                return BadRequest(new { message = "Penales solo si el marcador global está empatado." });
+
+            match.LocalPenaltyScore = dto.LocalPenaltyScore;
+            match.VisitorPenaltyScore = dto.VisitorPenaltyScore;
+            await _context.SaveChangesAsync();
+            await PushBroadcastAfterActaAsync(id, match, new { type = "PENALTY_SCORE", message = "Penales actualizados." });
+            return Ok(new { localPenaltyScore = match.LocalPenaltyScore, visitorPenaltyScore = match.VisitorPenaltyScore });
+        }
+
         // 4. Asignar sede y hora (Programación)
         [HttpPatch("{id}/schedule")]
         [Authorize(Policy = Permissions.TournMatchControl)]
@@ -477,6 +718,44 @@ namespace Siged.Api.Controllers.Core.Tournaments
             // Hora de reloj del evento (sin forzar UTC): el cliente envía "yyyy-MM-ddTHH:mm:ss" local a la organización.
             match.ScheduledAt = DateTime.SpecifyKind(scheduledAt, DateTimeKind.Unspecified);
             match.VenueId = venueId;
+
+            // Si se reprograma a un horario con margen, reabre bloqueo automático de listas para este partido.
+            if (match.Status != MatchStatus.EnVivo && match.Status != MatchStatus.Finalizado)
+            {
+                var scheduledUtc = DateTime.SpecifyKind(match.ScheduledAt, DateTimeKind.Local).ToUniversalTime();
+                var lockMinutesBeforeMatch = await ResolveLineupCloseMinutesAsync(match.DisciplineId);
+                if (scheduledUtc > DateTime.UtcNow.AddMinutes(lockMinutesBeforeMatch) && match.PhaseId != Guid.Empty)
+                {
+                    var competitionId = await _context.Phases
+                        .Where(p => p.Id == match.PhaseId)
+                        .Select(p => (Guid?)p.CompetitionId)
+                        .FirstOrDefaultAsync();
+                    if (competitionId == null)
+                    {
+                        await _context.SaveChangesAsync();
+                        await _vitrina.NotifyLandingRefreshAsync();
+                        return Ok(match);
+                    }
+
+                    var teamIds = new[] { match.LocalTeamId, match.VisitorTeamId }
+                        .Where(x => x.HasValue)
+                        .Select(x => x!.Value)
+                        .ToList();
+                    if (teamIds.Count > 0)
+                    {
+                        var rows = await _context.CompetitionTeams
+                            .Where(ct => ct.CompetitionId == competitionId.Value
+                                && teamIds.Contains(ct.TeamId)
+                                && ct.RosterLocked)
+                            .ToListAsync();
+                        foreach (var row in rows)
+                        {
+                            row.RosterLocked = false;
+                            row.RosterUnlockedAt = DateTime.UtcNow;
+                        }
+                    }
+                }
+            }
 
             await _context.SaveChangesAsync();
             await _vitrina.NotifyLandingRefreshAsync();
@@ -511,6 +790,10 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 if (!await PlayersBelongToTeamAsync(dto.TeamId, dto.PlayerId, null))
                     return BadRequest("El jugador debe pertenecer al equipo del evento.");
             }
+
+            var playerValidation = await ValidatePlayersForMatchActaAsync(match, dto.TeamId, dto.PlayerId, dto.RelatedPlayerId);
+            if (playerValidation != null)
+                return BadRequest(playerValidation);
 
             // ⚽ 1. Lógica de Marcador ÚNICA y VALIDADA
             if (dto.Type == MatchEventType.Goal || dto.Type == MatchEventType.Puntaje)
@@ -686,6 +969,13 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 if (match.LocalScore < 0) match.LocalScore = 0;
                 if (match.VisitorScore < 0) match.VisitorScore = 0;
             }
+            else if (matchEvent.Type == MatchEventType.PenaltyGoal)
+            {
+                if (match.LocalTeamId == matchEvent.TeamId)
+                    match.LocalPenaltyScore = Math.Max(0, (match.LocalPenaltyScore ?? 0) - 1);
+                else if (match.VisitorTeamId == matchEvent.TeamId)
+                    match.VisitorPenaltyScore = Math.Max(0, (match.VisitorPenaltyScore ?? 0) - 1);
+            }
 
             // 3. Eliminar el evento de la base de datos
             _context.MatchEvents.Remove(matchEvent);
@@ -708,6 +998,7 @@ namespace Siged.Api.Controllers.Core.Tournaments
             // 1. Incluimos Phase para saber si es la Final y los Teams para el nombre/logo
             var match = await _context.Matches
                 .Include(m => m.Phase)
+                .Include(m => m.Journal)
                 .Include(m => m.LocalTeam)
                 .Include(m => m.VisitorTeam)
                 .FirstOrDefaultAsync(m => m.Id == id);
@@ -715,6 +1006,25 @@ namespace Siged.Api.Controllers.Core.Tournaments
             if (match == null) return NotFound("El partido no existe.");
             if (match.Status == MatchStatus.Finalizado)
                 return BadRequest("El partido ya fue finalizado previamente.");
+
+            if (match.Phase?.IsDirectElimination == true
+                && match.Phase.IsDoubleLeg == false
+                && match.LocalTeamId.HasValue
+                && match.VisitorTeamId.HasValue
+                && match.LocalScore == match.VisitorScore)
+            {
+                var lp = match.LocalPenaltyScore ?? 0;
+                var vp = match.VisitorPenaltyScore ?? 0;
+                if (lp == vp)
+                {
+                    return BadRequest(new
+                    {
+                        message =
+                            "Eliminatoria empatada: registrá la tanda de penales (mesa, sección «Penales») con un ganador, " +
+                            "o desempatá en suplementario sumando goles al marcador antes de finalizar."
+                    });
+                }
+            }
 
             if (match.Status == MatchStatus.EnVivo)
                 MatchChronometerShared.FlushRunningClockSegment(match);
@@ -746,26 +1056,30 @@ namespace Siged.Api.Controllers.Core.Tournaments
                     // ... (notificación de standings)
                 }
 
+                if (match.WinnerId.HasValue && match.Phase?.IsDirectElimination == true)
+                {
+                    await AutoAdvanceKnockoutWinnerAsync(match);
+                    await _context.SaveChangesAsync();
+                }
+
+                var championAssigned = await TryAssignCompetitionChampionAsync(match);
+                if (championAssigned)
+                    await _context.SaveChangesAsync();
+
                 await transaction.CommitAsync();
 
-                // 🚀 DETECCIÓN AUTOMÁTICA DE CAMPEÓN
-                // Comprobamos si el nombre de la fase contiene "FINAL" (puedes usar el Order también)
-                var phase = match.Phase;
-                bool isGrandFinal = phase?.Name.Contains("FINAL", StringComparison.OrdinalIgnoreCase) == true;
-
-                if (isGrandFinal && match.WinnerId.HasValue && phase != null)
+                if (championAssigned && match.WinnerId.HasValue && match.Phase != null)
                 {
-                    var champion = match.WinnerId == match.LocalTeamId ? match.LocalTeam : match.VisitorTeam;
-                    if (champion != null)
+                    var championTeam = match.WinnerId == match.LocalTeamId ? match.LocalTeam : match.VisitorTeam;
+                    if (championTeam != null)
                     {
-                        // Emitimos un evento especial para TODO el Hub o la Competición
                         await _hubContext.Clients.All.SendAsync("ReceiveChampion", new
                         {
-                            competitionId = phase.CompetitionId,
-                            championName = champion.Name,
-                            championLogo = champion.LogoUrl,
+                            competitionId = match.Phase.CompetitionId,
+                            championName = championTeam.Name,
+                            championLogo = championTeam.LogoUrl,
                             score = $"{match.LocalScore} - {match.VisitorScore}",
-                            message = $"¡FELICIDADES {champion.Name}! CAMPEÓN DE LA {phase.Name.ToUpper()}"
+                            message = $"¡Felicidades {championTeam.Name}! Campeón de la competencia."
                         });
                     }
                 }
@@ -786,7 +1100,12 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
                 await _vitrina.NotifyLandingRefreshAsync();
 
-                return Ok(new { message = "Partido finalizado y campeón detectado.", winnerId = match.WinnerId });
+                return Ok(new
+                {
+                    message = "Partido finalizado.",
+                    winnerId = match.WinnerId,
+                    competitionChampionAssigned = championAssigned
+                });
             }
             catch (Exception ex)
             {
@@ -815,6 +1134,82 @@ namespace Siged.Api.Controllers.Core.Tournaments
             if (o.Date != utcNow.Date)
                 return true;
             return false;
+        }
+
+        private async Task AutoAdvanceKnockoutWinnerAsync(Match match)
+        {
+            if (match.Journal == null || !match.WinnerId.HasValue) return;
+
+            var currentSeq = match.Journal.Sequence;
+            var nextJournal = await _context.Journals
+                .AsNoTracking()
+                .FirstOrDefaultAsync(j => j.PhaseId == match.PhaseId && j.Sequence == currentSeq + 1);
+            if (nextJournal == null) return; // Ya es la final
+
+            var currentRoundIds = await _context.Matches
+                .Where(m => m.JournalId == match.JournalId && m.IsActive)
+                .OrderBy(m => m.CreatedAt)
+                .Select(m => m.Id)
+                .ToListAsync();
+            var idx = currentRoundIds.FindIndex(x => x == match.Id);
+            if (idx < 0) return;
+
+            var nextRound = await _context.Matches
+                .Where(m => m.JournalId == nextJournal.Id && m.IsActive)
+                .OrderBy(m => m.CreatedAt)
+                .ToListAsync();
+            if (nextRound.Count == 0) return;
+
+            var targetIndex = idx / 2;
+            if (targetIndex < 0 || targetIndex >= nextRound.Count) return;
+            var target = nextRound[targetIndex];
+            var asLocal = (idx % 2) == 0;
+
+            if (asLocal) target.LocalTeamId = match.WinnerId;
+            else target.VisitorTeamId = match.WinnerId;
+        }
+
+        /// <summary>
+        /// Si el partido cerrado es el único partido activo de la última jornada de una fase de eliminatoria ida simple,
+        /// persiste <see cref="Competition.ChampionTeamId"/> (p. ej. final única). Si la última jornada tiene más de un
+        /// partido (final + 3.er puesto), no asigna: usar PATCH manual en la competencia.
+        /// </summary>
+        private async Task<bool> TryAssignCompetitionChampionAsync(Match finishedMatch)
+        {
+            if (finishedMatch.WinnerId is null || finishedMatch.Phase is null)
+                return false;
+            if (!finishedMatch.Phase.IsDirectElimination || finishedMatch.Phase.IsDoubleLeg)
+                return false;
+            if (finishedMatch.Journal == null)
+                return false;
+
+            var phaseId = finishedMatch.PhaseId;
+            var maxSeq = await _context.Journals.AsNoTracking()
+                .Where(j => j.PhaseId == phaseId)
+                .MaxAsync(j => (int?)j.Sequence) ?? 0;
+            if (finishedMatch.Journal.Sequence != maxSeq)
+                return false;
+
+            var lastJournalIds = await _context.Journals.AsNoTracking()
+                .Where(j => j.PhaseId == phaseId && j.Sequence == maxSeq)
+                .Select(j => j.Id)
+                .ToListAsync();
+
+            var activeIds = await _context.Matches.AsNoTracking()
+                .Where(m => lastJournalIds.Contains(m.JournalId) && m.IsActive)
+                .Select(m => m.Id)
+                .ToListAsync();
+            if (activeIds.Count != 1 || activeIds[0] != finishedMatch.Id)
+                return false;
+
+            var competitionId = finishedMatch.Phase.CompetitionId;
+            var comp = await _context.Competitions.FirstOrDefaultAsync(c => c.Id == competitionId);
+            if (comp == null)
+                return false;
+
+            comp.ChampionTeamId = finishedMatch.WinnerId;
+            comp.ChampionDecidedAtUtc = DateTime.UtcNow;
+            return true;
         }
 
         private async Task AlignKickoffOccurredAtOnGoLiveAsync(Guid matchId)
@@ -946,8 +1341,425 @@ namespace Siged.Api.Controllers.Core.Tournaments
             await _context.SaveChangesAsync();
         }
 
+        private async Task<MatchReportResponse?> BuildMatchReportAsync(Guid id)
+        {
+            var match = await _context.Matches.AsNoTracking()
+                .Include(m => m.LocalTeam)
+                .Include(m => m.VisitorTeam)
+                .Include(m => m.Venue)
+                .Include(m => m.Discipline)
+                .Include(m => m.Phase)
+                    .ThenInclude(p => p.Competition)
+                        .ThenInclude(c => c.Tournament)
+                .FirstOrDefaultAsync(m => m.Id == id);
+            if (match == null) return null;
+
+            var lineups = await _context.MatchLineups.AsNoTracking()
+                .Where(l => l.MatchId == id)
+                .Include(l => l.Team)
+                .Include(l => l.Players)
+                    .ThenInclude(p => p.Player)
+                .ToListAsync();
+
+            var events = await _context.MatchEvents.AsNoTracking()
+                .Where(e => e.MatchId == id)
+                .Include(e => e.Player)
+                .Include(e => e.RelatedPlayer)
+                .ToListAsync();
+
+            var teams = new List<MatchReportTeamResponse>();
+            foreach (var teamId in new[] { match.LocalTeamId, match.VisitorTeamId }.Where(x => x.HasValue).Select(x => x!.Value))
+            {
+                var teamName = teamId == match.LocalTeamId
+                    ? match.LocalTeam?.Name ?? "Local"
+                    : match.VisitorTeam?.Name ?? "Visitante";
+
+                var lineup = lineups.FirstOrDefault(l => l.TeamId == teamId);
+                var rows = new Dictionary<Guid, MatchReportPlayerResponse>();
+
+                if (lineup != null)
+                {
+                    foreach (var lp in lineup.Players)
+                    {
+                        rows[lp.PlayerId] = new MatchReportPlayerResponse
+                        {
+                            PlayerId = lp.PlayerId,
+                            PlayerName = lp.Player.Name,
+                            Number = lp.ShirtNumber ?? lp.Player.Number,
+                            Role = lp.Role == MatchLineupPlayerRole.Starter ? "Titular" : "Suplente",
+                            Observation = lp.Observation
+                        };
+                    }
+                }
+
+                foreach (var ev in events.Where(e => e.TeamId == teamId))
+                {
+                    EnsureReportRow(rows, ev.Player, "No convocado");
+                    EnsureReportRow(rows, ev.RelatedPlayer, "No convocado");
+
+                    if (ev.PlayerId.HasValue && rows.TryGetValue(ev.PlayerId.Value, out var row))
+                    {
+                        // Penales de tanda no cuentan como goles de jugador en la planilla.
+                        if (ev.Type == MatchEventType.Goal || ev.Type == MatchEventType.Puntaje)
+                            row.Goals += Math.Max(ev.Value, 1);
+                        else if (ev.Type == MatchEventType.TarjetaAmarilla)
+                            row.YellowCards += 1;
+                        else if (ev.Type == MatchEventType.SegundaAmarilla)
+                            row.SecondYellowCards += 1;
+                        else if (ev.Type == MatchEventType.TarjetaRoja)
+                            row.DirectRedCards += 1;
+                        else if (ev.Type == MatchEventType.RojaPorDobleAmarilla)
+                            row.DoubleYellowRedCards += 1;
+                        else if (ev.Type == MatchEventType.Sustitucion)
+                            row.SubstitutionsOut += 1;
+                    }
+
+                    if (ev.Type == MatchEventType.Sustitucion
+                        && ev.RelatedPlayerId.HasValue
+                        && rows.TryGetValue(ev.RelatedPlayerId.Value, out var relatedRow))
+                    {
+                        relatedRow.SubstitutionsIn += 1;
+                    }
+                }
+
+                var players = rows.Values
+                    .OrderBy(p => p.Role == "Titular" ? 0 : p.Role == "Suplente" ? 1 : 2)
+                    .ThenBy(p => p.Number ?? 999)
+                    .ThenBy(p => p.PlayerName)
+                    .ToList();
+
+                teams.Add(new MatchReportTeamResponse
+                {
+                    TeamId = teamId,
+                    TeamName = teamName,
+                    StartersCount = players.Count(p => p.Role == "Titular"),
+                    SubstitutesCount = players.Count(p => p.Role == "Suplente"),
+                    Players = players
+                });
+            }
+
+            var teamNameById = new Dictionary<Guid, string>();
+            if (match.LocalTeamId.HasValue)
+                teamNameById[match.LocalTeamId.Value] = match.LocalTeam?.Name ?? "Local";
+            if (match.VisitorTeamId.HasValue)
+                teamNameById[match.VisitorTeamId.Value] = match.VisitorTeam?.Name ?? "Visitante";
+
+            var timeline = BuildMatchReportTimeline(events, teamNameById);
+            var (leftLogoUrl, rightLogoUrl) = await ResolveReportLogoUrlsAsync(match.DisciplineId);
+
+            return new MatchReportResponse
+            {
+                MatchId = match.Id,
+                TournamentName = match.Phase?.Competition?.Tournament?.Name,
+                CompetitionName = match.Phase?.Competition?.CategoryName,
+                DisciplineName = match.Discipline?.Name,
+                ScheduledAt = match.ScheduledAt,
+                LocalScore = match.LocalScore,
+                VisitorScore = match.VisitorScore,
+                LocalPenaltyScore = match.LocalPenaltyScore ?? 0,
+                VisitorPenaltyScore = match.VisitorPenaltyScore ?? 0,
+                DecisionType = ResolveDecisionType(match, events),
+                Teams = teams,
+                LocalTeamName = match.LocalTeam?.Name,
+                VisitorTeamName = match.VisitorTeam?.Name,
+                VenueName = match.Venue?.Name,
+                MatchNote = match.Note,
+                StatusLabel = MatchStatusLabel(match.Status),
+                Timeline = timeline,
+                LeftLogoUrl = leftLogoUrl,
+                RightLogoUrl = rightLogoUrl
+            };
+        }
+
+        private async Task<(string? left, string? right)> ResolveReportLogoUrlsAsync(Guid disciplineId)
+        {
+            try
+            {
+                var rules = await _context.DisciplineRules.AsNoTracking()
+                    .Where(r => r.DisciplineId == disciplineId
+                        && (r.RuleKey == DisciplineActaLogoLeftRuleKey || r.RuleKey == DisciplineActaLogoRightRuleKey))
+                    .ToListAsync();
+                var left = rules.FirstOrDefault(r => r.RuleKey == DisciplineActaLogoLeftRuleKey)?.RuleValue;
+                var right = rules.FirstOrDefault(r => r.RuleKey == DisciplineActaLogoRightRuleKey)?.RuleValue;
+
+                string? defaultLeft = null;
+                string? defaultRight = null;
+                try
+                {
+                    defaultLeft = await _context.AppSettings.AsNoTracking()
+                        .Where(s => s.Key == DefaultActaLogoLeftKey)
+                        .Select(s => s.Value)
+                        .FirstOrDefaultAsync();
+                    defaultRight = await _context.AppSettings.AsNoTracking()
+                        .Where(s => s.Key == DefaultActaLogoRightKey)
+                        .Select(s => s.Value)
+                        .FirstOrDefaultAsync();
+                }
+                catch
+                {
+                    // Sin tabla AppSettings migrada: solo logos por disciplina.
+                }
+
+                return (
+                    !string.IsNullOrWhiteSpace(left) ? left : defaultLeft,
+                    !string.IsNullOrWhiteSpace(right) ? right : defaultRight
+                );
+            }
+            catch
+            {
+                return (null, null);
+            }
+        }
+
+        private static string MatchStatusLabel(MatchStatus status) => status switch
+        {
+            MatchStatus.Programado => "Programado",
+            MatchStatus.EnVivo => "En vivo",
+            MatchStatus.Finalizado => "Finalizado",
+            MatchStatus.Suspendido => "Suspendido",
+            _ => status.ToString()
+        };
+
+        private static List<MatchReportEventLine> BuildMatchReportTimeline(
+            List<MatchEvent> events,
+            IReadOnlyDictionary<Guid, string> teamNames)
+        {
+            var list = new List<MatchReportEventLine>();
+            foreach (var e in events.OrderBy(x => x.Period).ThenBy(x => x.Minute).ThenBy(x => x.Id))
+            {
+                var team = teamNames.TryGetValue(e.TeamId, out var tn) ? tn : null;
+                switch (e.Type)
+                {
+                    case MatchEventType.Goal:
+                    case MatchEventType.Puntaje:
+                    {
+                        var cat = e.Type == MatchEventType.Puntaje ? "Punto" : "Gol";
+                        var who = e.Player?.Name ?? "—";
+                        var num = e.Player?.Number;
+                        var note = string.IsNullOrWhiteSpace(e.Note) ? "" : $" ({e.Note})";
+                        var pts = e.Type == MatchEventType.Puntaje && e.Value > 1 ? $" (+{e.Value})" : "";
+                        var body = num.HasValue ? $"{who} (#{num}){pts}" : $"{who}{pts}";
+                        list.Add(new MatchReportEventLine
+                        {
+                            Minute = e.Minute,
+                            Period = e.Period,
+                            Category = cat,
+                            TeamName = team,
+                            Text = body + note
+                        });
+                        break;
+                    }
+                    case MatchEventType.PenaltyGoal:
+                    {
+                        var who = e.Player?.Name ?? "—";
+                        var num = e.Player?.Number;
+                        var note = string.IsNullOrWhiteSpace(e.Note) ? "" : $" ({e.Note})";
+                        var body = num.HasValue ? $"{who} (#{num})" : who;
+                        list.Add(new MatchReportEventLine
+                        {
+                            Minute = e.Minute,
+                            Period = e.Period,
+                            Category = "Penal convertido",
+                            TeamName = team,
+                            Text = body + note
+                        });
+                        break;
+                    }
+                    case MatchEventType.PenaltyMiss:
+                    {
+                        var who = e.Player?.Name ?? "—";
+                        var num = e.Player?.Number;
+                        var note = string.IsNullOrWhiteSpace(e.Note) ? "" : $" ({e.Note})";
+                        var body = num.HasValue ? $"{who} (#{num})" : who;
+                        list.Add(new MatchReportEventLine
+                        {
+                            Minute = e.Minute,
+                            Period = e.Period,
+                            Category = "Penal fallado",
+                            TeamName = team,
+                            Text = body + note
+                        });
+                        break;
+                    }
+                    case MatchEventType.TarjetaAmarilla:
+                    case MatchEventType.SegundaAmarilla:
+                    case MatchEventType.TarjetaRoja:
+                    case MatchEventType.RojaPorDobleAmarilla:
+                    {
+                        var label = e.Type switch
+                        {
+                            MatchEventType.TarjetaAmarilla => "Amarilla",
+                            MatchEventType.SegundaAmarilla => "2.ª amarilla",
+                            MatchEventType.TarjetaRoja => "Roja",
+                            MatchEventType.RojaPorDobleAmarilla => "Roja (doble amarilla)",
+                            _ => "Tarjeta"
+                        };
+                        var who = e.Player?.Name ?? "—";
+                        var num = e.Player?.Number;
+                        var body = num.HasValue ? $"{who} (#{num})" : who;
+                        list.Add(new MatchReportEventLine
+                        {
+                            Minute = e.Minute,
+                            Period = e.Period,
+                            Category = "Tarjeta",
+                            TeamName = team,
+                            Text = $"{label}: {body}"
+                        });
+                        break;
+                    }
+                    case MatchEventType.Sustitucion:
+                    {
+                        var outP = e.Player?.Name ?? "—";
+                        var inP = e.RelatedPlayer?.Name ?? "—";
+                        list.Add(new MatchReportEventLine
+                        {
+                            Minute = e.Minute,
+                            Period = e.Period,
+                            Category = "Cambio",
+                            TeamName = team,
+                            Text = $"Sale {outP} · Entra {inP}"
+                        });
+                        break;
+                    }
+                    case MatchEventType.InicioPeriodo:
+                    case MatchEventType.FinPeriodo:
+                        list.Add(new MatchReportEventLine
+                        {
+                            Minute = e.Minute,
+                            Period = e.Period,
+                            Category = "Periodo",
+                            TeamName = null,
+                            Text = e.Type == MatchEventType.InicioPeriodo
+                                ? $"Inicio periodo {e.Period}"
+                                : $"Fin periodo {e.Period}"
+                        });
+                        break;
+                    default:
+                        break;
+                }
+            }
+
+            return list;
+        }
+
+        private static string ResolveDecisionType(Match match, List<MatchEvent> events)
+        {
+            var local = match.LocalScore;
+            var visitor = match.VisitorScore;
+            var localPen = match.LocalPenaltyScore ?? 0;
+            var visitorPen = match.VisitorPenaltyScore ?? 0;
+            var hadExtraTime = events.Any(e =>
+                (e.Type == MatchEventType.InicioPeriodo || e.Type == MatchEventType.FinPeriodo)
+                && e.Period > 2);
+
+            if (localPen != visitorPen)
+                return "Penales";
+            if (local != visitor && hadExtraTime)
+                return "Tiempo extra";
+            if (local != visitor)
+                return "Tiempo reglamentario";
+            return "Empate";
+        }
+
+        private async Task<int> ResolveLineupCloseMinutesAsync(Guid disciplineId)
+        {
+            const int fallbackMinutes = 5;
+            var value = await _context.DisciplineRules
+                .AsNoTracking()
+                .Where(r => r.DisciplineId == disciplineId && r.RuleKey == "CIERRE_PLANILLA_MINUTOS_ANTES")
+                .Select(r => r.RuleValue)
+                .FirstOrDefaultAsync();
+            if (int.TryParse(value, out var parsed))
+                return Math.Clamp(parsed, 0, 120);
+            return fallbackMinutes;
+        }
+
+        private async Task AutoLockRostersForMatchDetailAsync(Guid matchId)
+        {
+            var row = await _context.Matches.AsNoTracking()
+                .Where(m => m.Id == matchId)
+                .Select(m => new
+                {
+                    m.ScheduledAt,
+                    CompetitionId = m.Phase.CompetitionId,
+                    m.LocalTeamId,
+                    m.VisitorTeamId
+                })
+                .FirstOrDefaultAsync();
+            if (row == null || row.ScheduledAt.Year < 1900)
+                return;
+
+            var scheduled = DateTime.SpecifyKind(row.ScheduledAt, DateTimeKind.Local).ToUniversalTime();
+            if (scheduled > DateTime.UtcNow.AddMinutes(5))
+                return;
+
+            var teamIds = new[] { row.LocalTeamId, row.VisitorTeamId }
+                .Where(x => x.HasValue)
+                .Select(x => x!.Value)
+                .ToList();
+            if (teamIds.Count == 0)
+                return;
+
+            var rosterRows = await _context.CompetitionTeams
+                .Where(ct => ct.CompetitionId == row.CompetitionId
+                    && teamIds.Contains(ct.TeamId)
+                    && !ct.RosterLocked)
+                .ToListAsync();
+            if (rosterRows.Count == 0)
+                return;
+
+            var now = DateTime.UtcNow;
+            foreach (var roster in rosterRows)
+            {
+                roster.RosterLocked = true;
+                roster.RosterLockedAt = now;
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private static void EnsureReportRow(Dictionary<Guid, MatchReportPlayerResponse> rows, Player? player, string role)
+        {
+            if (player == null || rows.ContainsKey(player.Id))
+                return;
+
+            rows[player.Id] = new MatchReportPlayerResponse
+            {
+                PlayerId = player.Id,
+                PlayerName = player.Name,
+                Number = player.Number,
+                Role = role
+            };
+        }
+
+        private static string Csv(string value)
+        {
+            var safe = value.Replace("\"", "\"\"");
+            return $"\"{safe}\"";
+        }
+
         /// <summary>Mismo criterio que <see cref="Hubs.TournamentHub.JoinMatchRoom"/>.</summary>
         private static string MatchRoomGroup(Guid matchId) => matchId.ToString().ToLower();
+
+        private async Task<string?> ResolveLineupDelegateLabelAsync(Guid teamId)
+        {
+            var principal = await _context.TeamGestores.AsNoTracking()
+                .Where(g => g.TeamId == teamId && g.Kind == TeamGestorKind.Principal)
+                .Join(_context.Usuarios.AsNoTracking(), g => g.UsuarioId, u => u.Id, (g, u) => u)
+                .Join(_context.Personas.AsNoTracking(), u => u.PersonaId, p => p.Id,
+                    (u, p) => (p.Nombres + " " + p.Apellidos).Trim())
+                .FirstOrDefaultAsync();
+            if (!string.IsNullOrWhiteSpace(principal))
+                return principal;
+
+            var creator = await _context.Teams.AsNoTracking()
+                .Where(t => t.Id == teamId && t.CreatedByUsuarioId != null)
+                .Join(_context.Usuarios.AsNoTracking(), t => t.CreatedByUsuarioId!.Value, u => u.Id, (t, u) => u)
+                .Join(_context.Personas.AsNoTracking(), u => u.PersonaId, p => p.Id,
+                    (u, p) => (p.Nombres + " " + p.Apellidos).Trim())
+                .FirstOrDefaultAsync();
+            return creator;
+        }
 
         private static object HubMatchSnapshot(Match m) => new
         {
@@ -955,6 +1767,8 @@ namespace Siged.Api.Controllers.Core.Tournaments
             status = m.Status.ToString(),
             localScore = m.LocalScore,
             visitorScore = m.VisitorScore,
+            localPenaltyScore = m.LocalPenaltyScore ?? 0,
+            visitorPenaltyScore = m.VisitorPenaltyScore ?? 0,
             clockAccumulatedSeconds = m.ClockAccumulatedSeconds,
             clockPeriodAnchorUtc = m.ClockPeriodAnchorUtc,
             clockWidgetKind = m.ClockWidgetKind.ToString(),
@@ -993,5 +1807,70 @@ namespace Siged.Api.Controllers.Core.Tournaments
                 await _context.SaveChangesAsync();
             }
         }
+    }
+
+    public sealed class MatchReportResponse
+    {
+        public Guid MatchId { get; set; }
+        public string? TournamentName { get; set; }
+        public string? CompetitionName { get; set; }
+        /// <summary>Nombre de la disciplina deportiva (p. ej. Fútbol 11).</summary>
+        public string? DisciplineName { get; set; }
+        public DateTime ScheduledAt { get; set; }
+        public int LocalScore { get; set; }
+        public int VisitorScore { get; set; }
+        public int LocalPenaltyScore { get; set; }
+        public int VisitorPenaltyScore { get; set; }
+        public string DecisionType { get; set; } = "No definida";
+        public List<MatchReportTeamResponse> Teams { get; set; } = new();
+        public string? LocalTeamName { get; set; }
+        public string? VisitorTeamName { get; set; }
+        public string? VenueName { get; set; }
+        public string? MatchNote { get; set; }
+        public string StatusLabel { get; set; } = "";
+        public List<MatchReportEventLine> Timeline { get; set; } = new();
+        public string? LeftLogoUrl { get; set; }
+        public string? RightLogoUrl { get; set; }
+    }
+
+    public sealed class MatchReportEventLine
+    {
+        public int Minute { get; set; }
+        public int Period { get; set; }
+        public string Category { get; set; } = "";
+        public string? TeamName { get; set; }
+        public string Text { get; set; } = "";
+    }
+
+    public sealed class MatchReportTeamResponse
+    {
+        public Guid TeamId { get; set; }
+        public string TeamName { get; set; } = string.Empty;
+        public int StartersCount { get; set; }
+        public int SubstitutesCount { get; set; }
+        public List<MatchReportPlayerResponse> Players { get; set; } = new();
+        public int TotalGoals => Players.Sum(p => p.Goals);
+        public int TotalYellowCards => Players.Sum(p => p.YellowCards);
+        public int TotalSecondYellowCards => Players.Sum(p => p.SecondYellowCards);
+        public int TotalDirectRedCards => Players.Sum(p => p.DirectRedCards);
+        public int TotalDoubleYellowRedCards => Players.Sum(p => p.DoubleYellowRedCards);
+        public int TotalSubstitutionsOut => Players.Sum(p => p.SubstitutionsOut);
+        public int TotalSubstitutionsIn => Players.Sum(p => p.SubstitutionsIn);
+    }
+
+    public sealed class MatchReportPlayerResponse
+    {
+        public Guid PlayerId { get; set; }
+        public string PlayerName { get; set; } = string.Empty;
+        public int? Number { get; set; }
+        public string Role { get; set; } = string.Empty;
+        public int Goals { get; set; }
+        public int YellowCards { get; set; }
+        public int SecondYellowCards { get; set; }
+        public int DirectRedCards { get; set; }
+        public int DoubleYellowRedCards { get; set; }
+        public int SubstitutionsOut { get; set; }
+        public int SubstitutionsIn { get; set; }
+        public string? Observation { get; set; }
     }
 }
