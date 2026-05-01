@@ -502,8 +502,12 @@ namespace Siged.Api.Controllers.Core.Tournaments
 
         // --- EDICIÓN ---
 
+        /// <summary>
+        /// Misma puerta que DELETE / gestores: admin OTI, delegado con tourn.team.manage, o cualquier usuario con fila en TeamGestores.
+        /// La autorización fina por equipo la aplica <see cref="TeamManagementAuthorization.CanManageTeamAsync"/>.
+        /// </summary>
         [HttpPut("{id}")]
-        [Authorize(Policy = TournDelegateAuth.PolicyName)]
+        [Authorize(Policy = TournDelegateOrTeamGestorAuth.PolicyName)]
         public async Task<IActionResult> Update(Guid id, [FromForm] CreateTeamDto dto)
         {
             var team = await _context.Teams.FindAsync(id);

@@ -27,7 +27,8 @@ public static class MatchActaPdfComposer
             {
                 page.Size(PageSizes.A4);
                 page.Margin(26);
-                page.DefaultTextStyle(x => x.FontSize(9).FontFamily("Arial"));
+                // Sin fuente fija: "Arial" puede no existir en Linux/Docker y QuestPDF falla al generar.
+                page.DefaultTextStyle(x => x.FontSize(9));
 
                 page.Header().ShowOnce().Column(header =>
                 {
@@ -36,8 +37,17 @@ public static class MatchActaPdfComposer
                     {
                         row.ConstantItem(68).AlignMiddle().AlignCenter().Height(52).Element(c =>
                         {
-                            if (leftLogo != null)
-                                c.Image(leftLogo).FitArea();
+                            if (leftLogo != null && LooksLikeRasterImage(leftLogo))
+                            {
+                                try
+                                {
+                                    c.Image(leftLogo).FitArea();
+                                }
+                                catch
+                                {
+                                    c.Text("");
+                                }
+                            }
                             else
                                 c.Text("");
                         });
@@ -70,8 +80,17 @@ public static class MatchActaPdfComposer
                         });
                         row.ConstantItem(68).AlignMiddle().AlignCenter().Height(52).Element(c =>
                         {
-                            if (rightLogo != null)
-                                c.Image(rightLogo).FitArea();
+                            if (rightLogo != null && LooksLikeRasterImage(rightLogo))
+                            {
+                                try
+                                {
+                                    c.Image(rightLogo).FitArea();
+                                }
+                                catch
+                                {
+                                    c.Text("");
+                                }
+                            }
                             else
                                 c.Text("");
                         });
@@ -99,7 +118,7 @@ public static class MatchActaPdfComposer
 
                     foreach (var team in report.Teams)
                     {
-                        content.Item().PaddingTop(2).Text(team.TeamName)
+                        content.Item().PaddingTop(2).Text(string.IsNullOrWhiteSpace(team.TeamName) ? "Equipo" : team.TeamName)
                             .Bold().FontSize(10.5f).FontColor(Colors.BlueGrey.Darken3);
                         content.Item().Element(c => RenderTeamTable(c, team));
                     }
@@ -237,7 +256,7 @@ public static class MatchActaPdfComposer
                 table.Cell().Element(x => BodyCell(x, shaded)).Text(line.Minute >= 0 ? line.Minute.ToString() : "-");
                 table.Cell().Element(x => BodyCell(x, shaded)).Text(line.Category);
                 table.Cell().Element(x => BodyCell(x, shaded)).Text(string.IsNullOrWhiteSpace(line.TeamName) ? "-" : line.TeamName!);
-                table.Cell().Element(x => BodyCell(x, shaded)).Text(line.Text);
+                table.Cell().Element(x => BodyCell(x, shaded)).Text(string.IsNullOrWhiteSpace(line.Text) ? "—" : line.Text);
             }
         });
     }
@@ -250,12 +269,33 @@ public static class MatchActaPdfComposer
             return null;
         try
         {
-            using var http = new HttpClient();
-            return http.GetByteArrayAsync(url).GetAwaiter().GetResult();
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+            var bytes = http.GetByteArrayAsync(url).GetAwaiter().GetResult();
+            if (bytes == null || bytes.Length < 8 || !LooksLikeRasterImage(bytes))
+                return null;
+            if (bytes.Length > 6_000_000)
+                return null;
+            return bytes;
         }
         catch
         {
             return null;
         }
     }
+
+    /// <summary>Evita pasar HTML/JSON/SVG a QuestPDF.Image, que lanza y tumba todo el PDF.</summary>
+    private static bool LooksLikeRasterImage(ReadOnlySpan<byte> b)
+    {
+        if (b.Length >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF)
+            return true;
+        if (b.Length >= 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47 && b[4] == 0x0D && b[5] == 0x0A && b[6] == 0x1A && b[7] == 0x0A)
+            return true;
+        if (b.Length >= 6 && b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x38)
+            return true;
+        if (b.Length >= 12 && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46
+            && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50)
+            return true;
+        return false;
+    }
+
 }

@@ -36,11 +36,26 @@ public static class TeamManagementAuthorization
         if (team == null) return false;
 
         if (await TeamHasExplicitGestoresAsync(db, teamId, ct))
-            return await db.TeamGestores.AsNoTracking()
+        {
+            var isListedGestor = await db.TeamGestores.AsNoTracking()
                 .AnyAsync(g => g.TeamId == teamId && g.UsuarioId == uid.Value, ct);
+            if (isListedGestor)
+                return true;
 
-        var orgId = await TournDelegateAuth.GetOrganizacionIdAsync(user, db);
-        return orgId != null && orgId.Value == team.OrganizacionId;
+            // Delegado de escuela con permiso global: puede gestionar equipos de su organización
+            // aunque el equipo ya tenga gestores explícitos (principal/co-delegados en TeamGestores).
+            if (user.HasClaim("permission", Permissions.TournTeamManage))
+            {
+                var orgId = await TournDelegateAuth.GetOrganizacionIdAsync(user, db);
+                if (orgId != null && orgId.Value == team.OrganizacionId)
+                    return true;
+            }
+
+            return false;
+        }
+
+        var orgIdLegacy = await TournDelegateAuth.GetOrganizacionIdAsync(user, db);
+        return orgIdLegacy != null && orgIdLegacy.Value == team.OrganizacionId;
     }
 
     /// <summary>

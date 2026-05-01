@@ -1384,8 +1384,10 @@ namespace Siged.Api.Controllers.Core.Tournaments
                         rows[lp.PlayerId] = new MatchReportPlayerResponse
                         {
                             PlayerId = lp.PlayerId,
-                            PlayerName = lp.Player.Name,
-                            Number = lp.ShirtNumber ?? lp.Player.Number,
+                            PlayerName = string.IsNullOrWhiteSpace(lp.Player?.Name)
+                                ? "Jugador (sin datos)"
+                                : lp.Player!.Name,
+                            Number = lp.ShirtNumber ?? lp.Player?.Number,
                             Role = lp.Role == MatchLineupPlayerRole.Starter ? "Titular" : "Suplente",
                             Observation = lp.Observation
                         };
@@ -1726,7 +1728,9 @@ namespace Siged.Api.Controllers.Core.Tournaments
             rows[player.Id] = new MatchReportPlayerResponse
             {
                 PlayerId = player.Id,
-                PlayerName = player.Name,
+                PlayerName = string.IsNullOrWhiteSpace(player.Name)
+                    ? "Jugador (sin datos)"
+                    : player.Name,
                 Number = player.Number,
                 Role = role
             };
