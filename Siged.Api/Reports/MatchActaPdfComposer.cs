@@ -9,11 +9,31 @@ namespace Siged.Api.Reports;
 
 public static class MatchActaPdfComposer
 {
+    /// <summary>
+    /// Docker/Render suele usar globalization invariante; <see cref="CultureInfo.GetCultureInfo(string)"/> falla con es-PE.
+    /// </summary>
+    private static CultureInfo ResolveActaDateCulture()
+    {
+        foreach (var name in new[] { "es-PE", "es", "es-ES" })
+        {
+            try
+            {
+                return CultureInfo.GetCultureInfo(name);
+            }
+            catch (CultureNotFoundException)
+            {
+                // siguiente candidato
+            }
+        }
+
+        return CultureInfo.InvariantCulture;
+    }
+
     public static byte[] Generate(MatchReportResponse report)
     {
         var leftLogo = TryDownloadImage(report.LeftLogoUrl);
         var rightLogo = TryDownloadImage(report.RightLogoUrl);
-        var culture = CultureInfo.GetCultureInfo("es-PE");
+        var culture = ResolveActaDateCulture();
         var when = report.ScheduledAt.Year >= 1900
             ? report.ScheduledAt.ToString("dddd d 'de' MMMM 'de' yyyy HH:mm", culture)
             : "Sin fecha programada";

@@ -27,6 +27,8 @@ COPY --from=publish /app/publish .
 
 # Puerto estándar de .NET 8 para contenedores en Render
 ENV ASPNETCORE_URLS=http://+:8080
+# Sin esto, GetCultureInfo("es-PE") falla (CultureNotFoundException) y el PDF del acta devuelve 500.
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "Siged.Api.dll"]
